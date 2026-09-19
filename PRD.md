@@ -26,6 +26,14 @@ A shipping-ops team runs one shared inbox that mixes together document-checking 
 
 **Minion Ship** turns the inbox into a **pipeline** — a fixed sequence of processing stages, not an autonomous agent looping on its own decisions (see the terminology note in §2.2). Every email goes in one end, and a clear, structured result comes out the other end. Nobody has to read every email by hand to know what needs attention. Full technical detail is in **Architecture**; this section is the shape of the idea and the vocabulary we'll all use for it.
 
+**In one analogy:** think of it as a small shipping office adding one new hire and one strict process, instead of asking the existing staff to read every letter and cross-check every document by hand.
+
+- **The intern** (an AI reader) opens each letter, decides what it's about, and — for a real document-check request — reads the two attached documents and copies the 7 key facts from each onto a clean form, translating differently-worded labels into the same box because they understand English, not just exact wording.
+- **The accountant** (plain, boring code — no AI) runs a strict checklist over the finished forms: is anything blank? does a page look unreadable? does this look like the wrong kind of document? If it passes, the accountant lays the two forms side by side and checks all 7 boxes match — no interpretation, just a diff.
+- **The supervisor** (a human reviewer) only gets involved when the accountant's checklist fails. They see exactly which email and attachment triggered it, and either make the call directly or note that the sender needs to be asked for a clearer copy — nothing is guessed or hidden, and the report that goes to head office reflects what the intern-and-accountant team decided *on their own*, not a corrected answer (§2.4-C).
+
+That's the version we're building first (Tier 1, §7). Two more roles join once that loop is solid end to end: a **word-search clerk** who mechanically double-checks the intern's trickier translations before they're trusted (§2.4-B), and a few other refinements sequenced deliberately after the core works, not before (§7).
+
 ### 2.1 The core idea in one sentence
 
 Use a language model **only** for the two steps that genuinely need judgment — reading messy human language and matching two documents' worth of shipping jargon by *meaning* — and use plain deterministic code for every step where a wrong answer would be unacceptable (routing, the actual field-by-field diff, and deciding whether to trust the result at all).
