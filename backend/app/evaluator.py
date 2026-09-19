@@ -3,6 +3,7 @@ import re
 from rapidfuzz import fuzz
 
 from .llm import ask_json
+from .unit_normalizer import to_kg
 
 FIELD_LABELS = {
     "shipper": "Shipper",
@@ -15,10 +16,15 @@ FIELD_LABELS = {
 }
 FIELD_NAMES = tuple(FIELD_LABELS)
 
-NUMERIC_FIELDS = {"container_count", "gross_weight_kg"}
 FUZZY_MATCH_THRESHOLD = 90
 LITERAL_MATCH_THRESHOLD = 90
-WEIGHT_TOLERANCE_KG = 1.0
+WEIGHT_TOLERANCE_PCT = 0.005  # +/-0.5%, absorbs unit-conversion rounding (§2.4-E)
+
+# The sample dataset always writes container count as "N x SIZE'TYPE" (e.g.
+# "6 x 40'HC") — this pattern lets the Literal Match Check resolve that
+# specific transformation itself, permanently graduating the field off the
+# Grounding Verifier (§2.4-B).
+CONTAINER_COUNT_PATTERN = re.compile(r"(\d+)\s*x\s*\d+'?\s*[a-z]{1,4}\b", re.IGNORECASE)
 
 GROUNDING_SYSTEM_PROMPT = """You check whether an extracted value is actually attributable to a source document's text
 — i.e. whether it's a normalized or converted form of something the text says, not an invented or hallucinated value.
@@ -34,6 +40,16 @@ def _parse_number(value):
         return None
     match = re.search(r"-?\d+(\.\d+)?", str(value).replace(",", ""))
     return float(match.group()) if match else None
+
+
+def _weight_parts(value):
+    """gross_weight_kg is {"value": <number>, "unit": "<str>"} from the
+    extractor (§2.4-E). Tolerate a bare number for robustness against a
+    malformed extraction — to_kg() will then correctly return None (no
+    unit info), routing it to review rather than guessing kg."""
+    if isinstance(value, dict):
+        return value.get("value"), value.get("unit")
+    return value, None
 
 
 def _literal_match(value, source_text) -> bool:
@@ -80,13 +96,41 @@ def _grounded(value, source_text) -> bool:
     return _grounding_verify(value, source_text) == "confirmed"
 
 
-def _compare_numeric(field: str, si_value, bl_value) -> bool:
-    si_num, bl_num = _parse_number(si_value), _parse_number(bl_value)
-    if si_num is None or bl_num is None:
-        return False
-    if field == "gross_weight_kg":
-        return abs(si_num - bl_num) <= WEIGHT_TOLERANCE_KG
-    return si_num == bl_num
+def _parse_container_count(value, source_text):
+    """Confirms an extracted container count against the source text's own
+    'N x SIZE'TYPE' wording — deterministic, no LLM. Returns the count if
+    confirmed, else None (low-confidence, no LLM fallback for this field —
+    it's fully graduated off the Grounding Verifier, §2.4-B)."""
+    count = _parse_number(value)
+    if count is None:
+        return None
+    text_norm = _normalize_text(source_text)
+    for match in CONTAINER_COUNT_PATTERN.finditer(text_norm):
+        if int(match.group(1)) == int(count):
+            return int(count)
+    return None
+
+
+def _compare_container_count(si_value, bl_value, si_text, bl_text):
+    si_count = _parse_container_count(si_value, si_text)
+    bl_count = _parse_container_count(bl_value, bl_text)
+    if si_count is None or bl_count is None:
+        return None
+    return si_count == bl_count
+
+
+def _compare_weight(si_value, bl_value):
+    """Unit Normalizer + weight comparison (§2.4-E) — deterministic, no LLM.
+    Converts both sides to kg before comparing, with a relative tolerance to
+    absorb unit-conversion rounding rather than exact-match false-flagging.
+    No identifiable unit on either side is low-confidence, not a silent kg
+    assumption — routes to review like any other ungrounded field."""
+    si_kg = to_kg(*_weight_parts(si_value))
+    bl_kg = to_kg(*_weight_parts(bl_value))
+    if si_kg is None or bl_kg is None:
+        return None
+    tolerance = WEIGHT_TOLERANCE_PCT * max(abs(si_kg), abs(bl_kg))
+    return abs(si_kg - bl_kg) <= tolerance
 
 
 def _compare_text(si_value, bl_value) -> bool:
@@ -107,6 +151,7 @@ def _needs_review(reason: str, field_comparisons=None) -> dict:
     return {
         "status": "NEEDS_REVIEW",
         "review_reason": reason,
+        "processing_failure": False,
         "has_defect": False,
         "defect_fields": [],
         "field_comparisons": field_comparisons or {},
@@ -114,6 +159,19 @@ def _needs_review(reason: str, field_comparisons=None) -> dict:
 
 
 def compare_documents(si_result: dict, bl_result: dict) -> dict:
+    if si_result.get("processing_failure") or bl_result.get("processing_failure"):
+        # A system fault (LLM call failed after retries, a parser threw) —
+        # kept visibly separate from the four content review_reason values,
+        # no document to view, no judgment to make, just a retry (§2.4-F).
+        return {
+            "status": "NEEDS_REVIEW",
+            "review_reason": None,
+            "processing_failure": True,
+            "has_defect": False,
+            "defect_fields": [],
+            "field_comparisons": {},
+        }
+
     if not si_result["ok"] or not bl_result["ok"]:
         return _needs_review("unreadable")
 
@@ -131,12 +189,10 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
 
         if not both_found:
             match = None
-        elif name in NUMERIC_FIELDS:
-            # Numeric fields (container_count, gross_weight_kg) aren't yet
-            # covered by a Literal Match Check rule (that's the Tier 3
-            # container-count parser / Unit Normalizer work) — compare as
-            # today, deterministic only.
-            match = _compare_numeric(name, si_value, bl_value)
+        elif name == "container_count":
+            match = _compare_container_count(si_value, bl_value, si_text, bl_text)
+        elif name == "gross_weight_kg":
+            match = _compare_weight(si_value, bl_value)
         elif not _grounded(si_value, si_text) or not _grounded(bl_value, bl_text):
             # Neither the Literal Match Check nor the Grounding Verifier
             # could confirm this value is attributable to its own source —
@@ -159,6 +215,7 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
     return {
         "status": "MISMATCH" if defect_fields else "OK",
         "review_reason": None,
+        "processing_failure": False,
         "has_defect": bool(defect_fields),
         "defect_fields": defect_fields,
         "field_comparisons": field_comparisons,
