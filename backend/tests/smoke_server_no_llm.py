@@ -1,8 +1,9 @@
 """Smoke-test server: identical to run.py, except every LLM call site
-(classifier.py/extractor.py/evaluator.py's `ask_json`) is replaced with a
-canned, deterministic fake response. No network call, no real API key
-needed — just a non-empty placeholder in .env so llm.py's eager client
-construction doesn't crash at import time.
+(classifier.py's classify, extractor.py's combined SI+BL extract, and
+evaluator.py's Grounding Verifier) is replaced with a canned, deterministic
+fake response. No network call, no real API key needed — just a non-empty
+placeholder in .env so llm.py's eager client construction doesn't crash at
+import time.
 
 Lets you exercise the full DB/API layer (POST /api/runs, GET /api/emails/...,
 POST /api/emails/.../resolve, etc.) end-to-end for free, without spending
@@ -27,19 +28,25 @@ FAKE_EXTRACT = {
     "port_of_loading": "PORT OF LOADING TEST",
     "port_of_discharge": "PORT OF DISCHARGE TEST",
     "container_count": 1,
-    "gross_weight_kg": 1000,
+    "gross_weight_kg": {"value": 1000, "unit": "KG"},
 }
 
 
 def fake_ask_json(system_prompt, user_prompt, model=None):
     """Same SI/BL fake values every time -> every BL_COMPARISON case ends up
-    a clean OK match, which is enough to exercise the pipeline mechanics."""
+    a clean OK match. Fake values won't literally appear in the real source
+    text, so the Grounding Verifier prompt also gets faked (as "confirmed")
+    so it never needs a real LLM call either."""
     prompt = system_prompt.lower()
     if "triage classifier" in prompt:
         return dict(FAKE_CLASSIFY)
+    if "pair of shipping documents" in prompt:
+        return {"si": dict(FAKE_EXTRACT), "bl": dict(FAKE_EXTRACT)}
     if "extract shipment fields" in prompt:
         return dict(FAKE_EXTRACT)
-    return {"same": True, "reason": "fake: assumed same for smoke test"}
+    if "attributable to a source document" in prompt:
+        return {"verdict": "confirmed", "reason": "fake: assumed confirmed for smoke test"}
+    return {"error": "invalid_json", "raw": "fake_ask_json: unrecognized prompt"}
 
 
 with patch("app.classifier.ask_json", side_effect=fake_ask_json), \

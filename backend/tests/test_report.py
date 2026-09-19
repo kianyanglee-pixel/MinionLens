@@ -4,13 +4,16 @@ RUN_ID = "run-test-1"
 
 
 def _result(email_id="email_001", category="BL_COMPARISON", comparison=None, **overrides):
-    return {
+    result = {
         "email_id": email_id,
         "category": category,
         "confidence": overrides.get("confidence", "high"),
         "reason": overrides.get("reason", "looks like a comparison request"),
         "comparison": comparison,
     }
+    if "processing_failure" in overrides:
+        result["processing_failure"] = overrides["processing_failure"]
+    return result
 
 
 def _comparison(**overrides):
@@ -87,4 +90,16 @@ def test_processing_failure_flag_defaults_false_and_is_read_when_present():
 
     comparison = _comparison(status="NEEDS_REVIEW", review_reason="unreadable", processing_failure=True)
     entry, row = build_report(_result(comparison=comparison), RUN_ID)
+    assert row["is_processing_failure"] is True
+
+
+def test_classification_level_processing_failure_is_not_dropped():
+    """classify_email() can flag processing_failure before any comparison is
+    even attempted (category is None, comparison is None) — must still be
+    recorded as a processing failure, not silently treated as a normal
+    non-BL_COMPARISON email."""
+    result = _result(category=None, comparison=None, processing_failure=True)
+    entry, row = build_report(result, RUN_ID)
+
+    assert entry["category"] is None
     assert row["is_processing_failure"] is True

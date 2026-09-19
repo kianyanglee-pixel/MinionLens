@@ -12,20 +12,23 @@ def now():
 def build_report(result: dict, run_id: str) -> tuple:
     """Returns (submission_entry, email_row) for one processed email."""
     comparison = result.get("comparison")
+    # classify_email() can itself flag a processing failure (LLM response
+    # didn't parse) at the top level, before any comparison is attempted —
+    # that must count too, not just a failure inside the comparison step.
+    processing_failure = result.get("processing_failure", False)
 
     if comparison is None:
         status = None
         review_reason = None
         has_defect = False
         defect_fields = []
-        processing_failure = False
         trace_comparison = None
     else:
         status = comparison["status"]
         review_reason = comparison["review_reason"]
         has_defect = comparison["has_defect"]
         defect_fields = comparison["defect_fields"]
-        processing_failure = comparison.get("processing_failure", False)
+        processing_failure = processing_failure or comparison.get("processing_failure", False)
         trace_comparison = {
             "field_comparisons": comparison.get("field_comparisons", {}),
             "si_path": comparison.get("si_path"),
