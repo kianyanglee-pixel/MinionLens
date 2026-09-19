@@ -2,7 +2,7 @@ import re
 
 from rapidfuzz import fuzz
 
-from llm import ask_json
+from .llm import ask_json
 
 FIELD_LABELS = {
     "shipper": "Shipper",

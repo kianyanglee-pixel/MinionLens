@@ -1,4 +1,4 @@
-from llm import ask_json
+from .llm import ask_json
 
 CATEGORIES = ("BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM")
 
