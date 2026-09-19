@@ -2,6 +2,8 @@ import io
 from pathlib import Path
 
 import pandas as pd
+import pdfplumber
+from docx import Document
 
 from .llm import ask_json
 
@@ -14,8 +16,6 @@ FIELD_NAMES = (
     "container_count",
     "gross_weight_kg",
 )
-
-ON_HOLD_EXTENSIONS = {".pdf", ".docx"}
 
 EXTRACT_SYSTEM_PROMPT = """You extract shipment fields from a Shipping Instruction (SI) or Bill of Lading (BL) document.
 Extract exactly these fields: shipper, consignee, notify_party, port_of_loading, port_of_discharge, container_count, gross_weight_kg.
@@ -33,26 +33,51 @@ def _extract_from_text(text: str) -> dict:
     return {name: result.get(name) for name in FIELD_NAMES}
 
 
-def _extract_from_spreadsheet(raw_bytes: bytes) -> dict:
+def _text_from_spreadsheet(raw_bytes: bytes) -> str:
     sheets = pd.read_excel(io.BytesIO(raw_bytes), sheet_name=None, header=None, engine="openpyxl")
     chunks = []
     for sheet_name, df in sheets.items():
         chunks.append(f"--- sheet: {sheet_name} ---")
         chunks.append(df.to_csv(index=False, header=False))
-    return _extract_from_text("\n".join(chunks))
+    return "\n".join(chunks)
+
+
+def _text_from_pdf(raw_bytes: bytes) -> str:
+    """Text-layer extraction only — a scanned/image-only PDF has no text
+    layer and yields an empty string, which the caller treats as unreadable
+    rather than attempting OCR."""
+    with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+        pages = [page.extract_text() or "" for page in pdf.pages]
+    return "\n".join(pages).strip()
+
+
+def _text_from_docx(raw_bytes: bytes) -> str:
+    doc = Document(io.BytesIO(raw_bytes))
+    chunks = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            chunks.append("\t".join(cell.text for cell in row.cells))
+    return "\n".join(chunks).strip()
 
 
 def extract_fields(inbox, att_path: str) -> dict:
     ext = Path(att_path).suffix.lower()
 
     if ext == ".txt":
-        fields = _extract_from_text(inbox.read_text(att_path))
+        text = inbox.read_text(att_path)
     elif ext in (".xlsx", ".xls"):
-        fields = _extract_from_spreadsheet(inbox.read_bytes(att_path))
-    elif ext in ON_HOLD_EXTENSIONS:
-        return {"path": att_path, "ok": False, "error": f"on_hold_format:{ext}", "fields": {}, "found": {}}
+        text = _text_from_spreadsheet(inbox.read_bytes(att_path))
+    elif ext == ".pdf":
+        text = _text_from_pdf(inbox.read_bytes(att_path))
+        if not text:
+            return {"path": att_path, "ok": False, "error": "unreadable", "fields": {}, "found": {}, "text": ""}
+    elif ext == ".docx":
+        text = _text_from_docx(inbox.read_bytes(att_path))
+        if not text:
+            return {"path": att_path, "ok": False, "error": "unreadable", "fields": {}, "found": {}, "text": ""}
     else:
-        return {"path": att_path, "ok": False, "error": f"rejected_format:{ext}", "fields": {}, "found": {}}
+        return {"path": att_path, "ok": False, "error": f"rejected_format:{ext}", "fields": {}, "found": {}, "text": ""}
 
+    fields = _extract_from_text(text)
     found = {name: bool(value is not None and str(value).strip()) for name, value in fields.items()}
-    return {"path": att_path, "ok": True, "error": None, "fields": fields, "found": found}
+    return {"path": att_path, "ok": True, "error": None, "fields": fields, "found": found, "text": text}
