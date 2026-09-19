@@ -24,6 +24,19 @@ def classify_email(email: dict) -> dict:
     )
     result = ask_json(CLASSIFY_SYSTEM_PROMPT, user_prompt)
 
+    if result.get("error") == "invalid_json":
+        # The LLM call succeeded but its response couldn't be parsed — a
+        # processing failure, not a content judgment. Distinct from
+        # defaulting to GENERAL, so the Confidence Gate can route this to a
+        # retry rather than silently mislabeling the email (§2.4-F).
+        return {
+            "email_id": email.get("email_id"),
+            "category": None,
+            "confidence": "low",
+            "reason": "LLM response could not be parsed as JSON",
+            "processing_failure": True,
+        }
+
     category = result.get("category")
     confidence = result.get("confidence", "low")
     reason = result.get("reason", "")
@@ -37,4 +50,5 @@ def classify_email(email: dict) -> dict:
         "category": category,
         "confidence": confidence,
         "reason": reason,
+        "processing_failure": False,
     }
