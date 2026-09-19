@@ -108,8 +108,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onIngestBatch }) => {
           <button
             type="button"
             onClick={() => setSourceType('local')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              sourceType === 'local' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              sourceType === 'local'
+                ? 'bg-white text-blue-700 shadow-sm border border-slate-200'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <HardDrive className="w-3.5 h-3.5" /> Local
@@ -117,8 +119,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onIngestBatch }) => {
           <button
             type="button"
             onClick={() => setSourceType('cloud')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              sourceType === 'cloud' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              sourceType === 'cloud'
+                ? 'bg-white text-blue-700 shadow-sm border border-slate-200'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Cloud className="w-3.5 h-3.5" /> S3 / GCS
