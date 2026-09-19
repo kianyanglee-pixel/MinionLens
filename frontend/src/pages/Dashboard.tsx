@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { 
   Plus, CheckCircle2, XCircle, AlertCircle, 
-  Search, ExternalLink, ShieldCheck, X, FileText 
+  Search, ExternalLink, ShieldCheck, X, FileText,
+  Ship, Compass, Activity, Clock, SlidersHorizontal,
+  Layers, Radio, Sparkles, ArrowRight
 } from 'lucide-react';
 import { FileUpload } from '../components/FileUpload';
 
@@ -40,32 +42,37 @@ const INITIAL_RECORDS: EmailRecord[] = [
     time: '07:01',
     confidence: 'high',
     fields: {
-      shipper: { label: 'Shipper', siValue: 'Meridian Exports Sdn Bhd', blValue: 'Meridian Exports Sdn Bhd', match: true },
-      consignee: { label: 'Consignee', siValue: 'Hafal Trading Co.', blValue: 'Hafal Trading Co.', match: true },
-      notify_party: { label: 'Notify party', siValue: 'Hafal Trading Co.', blValue: 'Hafal Trading Co.', match: true },
-      port_of_loading: { label: 'Port of loading', siValue: 'Port Klang, MY', blValue: 'Port Klang, MY', match: true },
-      port_of_discharge: { label: 'Port of discharge', siValue: 'Rotterdam, NL', blValue: 'Rotterdam, NL', match: true },
-      container_count: { label: 'Container count', siValue: '3', blValue: '4', match: false },
-      gross_weight_kg: { label: 'Gross weight (kg)', siValue: '22,000', blValue: '22,000', match: true },
+      shipper: { label: 'Shipper Name', siValue: 'Meridian Exports Sdn Bhd', blValue: 'Meridian Exports Sdn Bhd', match: true },
+      consignee: { label: 'Consignee Name', siValue: 'Hafal Trading Co.', blValue: 'Hafal Trading Co.', match: true },
+      notify_party: { label: 'Notify Party', siValue: 'Hafal Trading Co.', blValue: 'Hafal Trading Co.', match: true },
+      port_of_loading: { label: 'Port of Loading (POL)', siValue: 'Port Klang, MY', blValue: 'Port Klang, MY', match: true },
+      port_of_discharge: { label: 'Port of Discharge (POD)', siValue: 'Rotterdam, NL', blValue: 'Rotterdam, NL', match: true },
+      container_count: { label: 'Container Count', siValue: '3 x 40HC', blValue: '4 CONTAINERS', match: false },
+      gross_weight_kg: { label: 'Gross Weight (kg)', siValue: '22,000 KG', blValue: '22,000 KG', match: true },
     },
     trace: [
-      'Classified as document comparison request · confidence high',
-      'Extracted 7/7 fields from SI.pdf and 7/7 fields from BL_draft.pdf',
-      'Compared values — 1 mismatch found on container count'
+      'LLM Classifier: Document comparison request detected (confidence 99.4%)',
+      'Extracted 7/7 structured fields from SI.txt and 7/7 fields from BL_draft.txt',
+      'Automated Diff Engine: Discrepancy detected in [Container Count] (SI: 3 vs BL: 4)',
+      'Flagged for dispatcher review & escalation'
     ],
-    rawSiText: "SHIPPER: Meridian Exports Sdn Bhd\nCONSIGNEE: Hafal Trading Co.\nPOL: Port Klang\nPOD: Rotterdam\nCONTAINERS: 3x40HC\nWEIGHT: 22000 KGS",
+    rawSiText: "SHIPPER: Meridian Exports Sdn Bhd\nCONSIGNEE: Hafal Trading Co.\nPOL: Port Klang, MY\nPOD: Rotterdam, NL\nCONTAINERS: 3x40HC\nWEIGHT: 22000 KGS",
     rawBlText: "SHIPPER: Meridian Exports Sdn Bhd\nCONSIGNEE: Hafal Trading Co.\nPORT OF LOADING: Port Klang, MY\nPORT OF DISCHARGE: Rotterdam, NL\nTOTAL PACKAGES: 4 CONTAINERS\nGROSS MASS: 22000 KG"
   },
   {
     id: 'PC-9902',
     sender: 'Pacific Carrier Co.',
-    subject: 'Shipping instruction attached',
+    subject: 'Shipping instruction attached — PC-9902',
     category: 'document_comparison',
     status: 'unreadable',
     statusText: 'BL unreadable',
     time: '06:54',
     confidence: 'low',
-    trace: ['Classified as document comparison request', 'BL attachment corrupted or low scan resolution', 'Escalated to human review queue']
+    trace: [
+      'LLM Classifier: Document comparison request detected',
+      'Extraction Error: BL attachment unreadable or corrupted OCR image',
+      'Escalated to human review queue with priority flag'
+    ]
   },
   {
     id: 'MRD-6602',
@@ -73,36 +80,40 @@ const INITIAL_RECORDS: EmailRecord[] = [
     subject: 'BL check — booking MRD-6602',
     category: 'document_comparison',
     status: 'clear',
-    statusText: 'No mismatch',
+    statusText: '100% Match',
     time: '06:48',
     confidence: 'high',
     fields: {
-      shipper: { label: 'Shipper', siValue: 'Meridian Exports Sdn Bhd', blValue: 'Meridian Exports Sdn Bhd', match: true },
-      consignee: { label: 'Consignee', siValue: 'Apex Supply LLC', blValue: 'Apex Supply LLC', match: true },
-      notify_party: { label: 'Notify party', siValue: 'Apex Supply LLC', blValue: 'Apex Supply LLC', match: true },
-      port_of_loading: { label: 'Port of loading', siValue: 'Singapore, SG', blValue: 'Singapore, SG', match: true },
-      port_of_discharge: { label: 'Port of discharge', siValue: 'Hamburg, DE', blValue: 'Hamburg, DE', match: true },
-      container_count: { label: 'Container count', siValue: '2', blValue: '2', match: true },
-      gross_weight_kg: { label: 'Gross weight (kg)', siValue: '18,400', blValue: '18,400', match: true },
+      shipper: { label: 'Shipper Name', siValue: 'Meridian Exports Sdn Bhd', blValue: 'Meridian Exports Sdn Bhd', match: true },
+      consignee: { label: 'Consignee Name', siValue: 'Apex Supply LLC', blValue: 'Apex Supply LLC', match: true },
+      notify_party: { label: 'Notify Party', siValue: 'Apex Supply LLC', blValue: 'Apex Supply LLC', match: true },
+      port_of_loading: { label: 'Port of Loading (POL)', siValue: 'Singapore, SG', blValue: 'Singapore, SG', match: true },
+      port_of_discharge: { label: 'Port of Discharge (POD)', siValue: 'Hamburg, DE', blValue: 'Hamburg, DE', match: true },
+      container_count: { label: 'Container Count', siValue: '2 x 20GP', blValue: '2 x 20GP', match: true },
+      gross_weight_kg: { label: 'Gross Weight (kg)', siValue: '18,400 KG', blValue: '18,400 KG', match: true },
     },
-    trace: ['Classified as document comparison request', 'Extracted 7/7 fields cleanly', 'All 7 values verified equal']
+    trace: [
+      'LLM Classifier: Document comparison request detected',
+      'Extracted 7/7 fields cleanly from both SI and BL drafts',
+      'All 7 shipment parameters verified equal — auto-approved'
+    ]
   },
   {
     id: 'INV-7741',
     sender: 'Accounts – Meridian',
-    subject: 'Invoice #7741 outstanding balance',
+    subject: 'Invoice #7741 outstanding balance query',
     category: 'invoice_query',
     status: 'clear',
-    statusText: 'Invoice query',
+    statusText: 'Invoice Query',
     time: '06:31'
   },
   {
     id: 'SPAM-882',
     sender: 'unknown-sender-882',
-    subject: 'You have WON a prize!!',
+    subject: 'Urgent: You have WON a freight voucher!',
     category: 'spam',
     status: 'clear',
-    statusText: 'Spam',
+    statusText: 'Filtered Spam',
     time: '06:20'
   }
 ];
@@ -113,6 +124,7 @@ export const Dashboard: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [showSourceViewer, setShowSourceViewer] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const selectedRecord = records.find(r => r.id === selectedId) || records[0];
 
@@ -126,6 +138,13 @@ export const Dashboard: React.FC = () => {
   };
 
   const filteredRecords = records.filter(r => {
+    const matchesQuery = searchQuery === '' || 
+      r.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.sender.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.subject.toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (!matchesQuery) return false;
+
     if (activeFilter === 'Mismatches') return r.status === 'mismatch';
     if (activeFilter === 'Needs review') return r.status === 'unreadable';
     if (activeFilter === 'Clear') return r.status === 'clear' && r.category === 'document_comparison';
@@ -134,105 +153,206 @@ export const Dashboard: React.FC = () => {
   });
 
   return (
-    <div className="flex flex-col h-screen bg-[#FDFCFB] text-slate-800 antialiased overflow-hidden">
-      {/* Top Navbar */}
-      <header className="h-14 border-b border-slate-200 bg-white flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-indigo-600" />
-            <span className="font-bold text-base tracking-tight text-slate-900">ShipCheck</span>
+    <div className="flex flex-col h-screen bg-[#F8FAFC] text-slate-800 font-sans antialiased overflow-hidden">
+      
+      {/* Clean Top Navbar */}
+      <header className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-6 shrink-0 z-30 shadow-xs">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
+              <Ship className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-lg tracking-tight text-slate-900">
+                  MinionShip
+                </span>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded-md bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wider">
+                  Verification Core
+                </span>
+              </div>
+            </div>
           </div>
-          <span className="text-xs text-slate-400 font-normal pl-2 border-l border-slate-200">
-            Document Verification
-          </span>
         </div>
 
+        {/* Live Status Indicator */}
+        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-xs">
+          <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+          <span className="text-slate-600 font-mono text-[11px]">LIVE SYNC</span>
+          <span className="text-slate-300">|</span>
+          <span className="text-emerald-700 font-mono font-semibold text-[11px]">PORT KLANG / ROTTERDAM</span>
+        </div>
+
+        {/* Search & Profile */}
         <div className="flex items-center gap-4">
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input 
               type="text"
-              placeholder="Search emails or fields"
-              className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs w-64 focus:outline-none focus:ring-1 focus:ring-slate-400 bg-slate-50/50"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search booking ID, shipper, parameters..."
+              className="pl-9 pr-12 py-1.5 rounded-xl border border-slate-200 bg-slate-50/80 text-xs w-72 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 transition-all"
             />
+            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white rounded border border-slate-200 shadow-2xs">
+              ⌘K
+            </kbd>
           </div>
-          <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-semibold">
-            IN
+
+          <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
+            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center text-xs font-bold font-mono shadow-xs">
+              OP
+            </div>
           </div>
         </div>
       </header>
 
+      {/* Summary Metrics Bar */}
+      <div className="bg-white border-b border-slate-200/80 px-6 py-3.5 grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+        <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">Today's Ingested</p>
+            <p className="text-xl font-extrabold text-slate-900 font-mono mt-0.5">50 <span className="text-xs text-slate-500 font-sans font-normal">Emails</span></p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+            <Layers className="w-4.5 h-4.5" />
+          </div>
+        </div>
+
+        <div className="bg-rose-50/50 border border-rose-200/80 rounded-xl p-3.5 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold text-rose-700 uppercase tracking-wider font-mono">Discrepancies Flagged</p>
+            <p className="text-xl font-extrabold text-rose-700 font-mono mt-0.5">{counts.mismatches} <span className="text-xs text-rose-600/80 font-sans font-normal">Mismatches</span></p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-rose-100/80 text-rose-600 border border-rose-200">
+            <AlertCircle className="w-4.5 h-4.5" />
+          </div>
+        </div>
+
+        <div className="bg-amber-50/50 border border-amber-200/80 rounded-xl p-3.5 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider font-mono">Human Review Queue</p>
+            <p className="text-xl font-extrabold text-amber-800 font-mono mt-0.5">{counts.review} <span className="text-xs text-amber-700/80 font-sans font-normal">Unreadable BL</span></p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-amber-100/80 text-amber-700 border border-amber-200">
+            <Clock className="w-4.5 h-4.5" />
+          </div>
+        </div>
+
+        <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-xl p-3.5 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider font-mono">Auto Verification Rate</p>
+            <p className="text-xl font-extrabold text-emerald-800 font-mono mt-0.5">96.8% <span className="text-xs text-emerald-700/80 font-sans font-normal">Verified</span></p>
+          </div>
+          <div className="p-2.5 rounded-lg bg-emerald-100/80 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 className="w-4.5 h-4.5" />
+          </div>
+        </div>
+      </div>
+
       {/* Main 3-Column Workspace */}
       <div className="flex flex-1 overflow-hidden">
         
-        {/* Left Column: Runs & Batches */}
-        <aside className="w-56 border-r border-slate-200 bg-[#FAF9F8] p-4 flex flex-col justify-between shrink-0">
+        {/* Left Column: Runs & Batches Navigation */}
+        <aside className="w-60 border-r border-slate-200 bg-[#F1F5F9]/50 p-4 flex flex-col justify-between shrink-0">
           <div>
+            {/* Run New Batch Button */}
             <button 
               onClick={() => setShowUploadModal(true)}
-              className="w-full bg-[#1E2538] hover:bg-slate-800 text-white text-xs font-medium py-2.5 px-3 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-colors mb-6"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all mb-6"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Run new batch
+              <Plus className="w-4 h-4 stroke-[3]" />
+              Run New Batch Ingestion
             </button>
 
             <div className="space-y-4">
               <div>
-                <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">This Week</span>
-                <div className="mt-2 space-y-1">
-                  <div className="p-2.5 rounded-lg bg-white border border-slate-200 shadow-xs flex items-center justify-between cursor-pointer">
+                <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-slate-500 uppercase font-mono px-1">
+                  <span>BATCH HISTORY</span>
+                  <Compass className="w-3.5 h-3.5 text-blue-600" />
+                </div>
+
+                <div className="mt-2.5 space-y-1.5">
+                  {/* Today Active Batch */}
+                  <div className="p-3 rounded-xl bg-white border border-blue-300 shadow-xs flex items-center justify-between cursor-pointer">
                     <div>
-                      <div className="text-xs font-semibold text-slate-800">Fri, Sep 19</div>
-                      <div className="text-[10px] text-slate-500">50 emails sorted</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                        <div className="text-xs font-bold text-slate-900 font-mono">Fri, Sep 19</div>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">50 emails processed</div>
                     </div>
-                    <span className="text-xs font-semibold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">3</span>
+                    <span className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full font-mono">3 alert</span>
                   </div>
-                  <div className="p-2.5 rounded-lg hover:bg-slate-100/60 transition-colors flex items-center justify-between cursor-pointer">
+
+                  {/* Previous Days */}
+                  <div className="p-3 rounded-xl bg-white/60 hover:bg-white border border-slate-200/60 transition-all flex items-center justify-between cursor-pointer text-slate-700">
                     <div>
-                      <div className="text-xs font-medium text-slate-600">Thu, Sep 18</div>
-                      <div className="text-[10px] text-slate-400">44 emails sorted</div>
+                      <div className="text-xs font-semibold font-mono text-slate-800">Thu, Sep 18</div>
+                      <div className="text-[11px] text-slate-500">44 emails processed</div>
                     </div>
-                    <span className="text-xs text-slate-400">1</span>
+                    <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">1 alert</span>
                   </div>
-                  <div className="p-2.5 rounded-lg hover:bg-slate-100/60 transition-colors flex items-center justify-between cursor-pointer">
+
+                  <div className="p-3 rounded-xl bg-white/60 hover:bg-white border border-slate-200/60 transition-all flex items-center justify-between cursor-pointer text-slate-700">
                     <div>
-                      <div className="text-xs font-medium text-slate-600">Wed, Sep 17</div>
-                      <div className="text-[10px] text-slate-400">38 emails sorted</div>
+                      <div className="text-xs font-semibold font-mono text-slate-800">Wed, Sep 17</div>
+                      <div className="text-[11px] text-slate-500">38 emails processed</div>
                     </div>
-                    <span className="text-xs text-slate-400">0</span>
+                    <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">0 alert</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          <p className="text-[10px] text-slate-400">Runs auto-trigger daily at 7:00 AM</p>
+
+          <div className="p-3 bg-white border border-slate-200/80 rounded-xl flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <p className="text-[10px] text-slate-500 font-mono">CRON Schedule: <span className="text-slate-800 font-semibold">Daily @ 07:00 UTC</span></p>
+          </div>
         </aside>
 
-        {/* Middle Column: Email Queue */}
-        <section className="w-84 border-r border-slate-200 bg-white flex flex-col shrink-0">
-          <div className="p-4 border-b border-slate-100">
-            <h2 className="text-xs font-bold text-slate-800">Friday, Sep 19</h2>
-            <p className="text-[10px] text-slate-400 mt-0.5">50 emails processed · run completed 07:03 AM</p>
+        {/* Middle Column: Email Verification Queue */}
+        <section className="w-96 border-r border-slate-200 bg-white flex flex-col shrink-0">
+          <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xs font-extrabold text-slate-900 tracking-wider font-mono uppercase">INBOX QUEUE</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">50 items in current batch · Run completed 07:03</p>
+              </div>
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 cursor-pointer hover:text-blue-600 transition-colors" />
+            </div>
 
             {/* Filter Pills */}
-            <div className="flex items-center gap-1 mt-3 overflow-x-auto pb-1 text-[11px]">
+            <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 text-[11px]">
               {[
-                { label: 'All', count: counts.all, bg: 'bg-slate-900 text-white' },
-                { label: 'Mismatches', count: counts.mismatches, bg: 'bg-rose-50 text-rose-600 hover:bg-rose-100' },
-                { label: 'Needs review', count: counts.review, bg: 'bg-amber-50 text-amber-600 hover:bg-amber-100' },
-                { label: 'Clear', count: counts.clear, bg: 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' },
-                { label: 'Spam', count: counts.spam, bg: 'bg-slate-100 text-slate-600 hover:bg-slate-200' }
-              ].map(tab => (
-                <button
-                  key={tab.label}
-                  onClick={() => setActiveFilter(tab.label)}
-                  className={`px-2 py-1 rounded-full whitespace-nowrap transition-colors font-medium ${
-                    activeFilter === tab.label ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {tab.label} {tab.count}
-                </button>
-              ))}
+                { label: 'All', count: counts.all },
+                { label: 'Mismatches', count: counts.mismatches, alert: true },
+                { label: 'Needs review', count: counts.review, warn: true },
+                { label: 'Clear', count: counts.clear, success: true },
+                { label: 'Spam', count: counts.spam }
+              ].map(tab => {
+                const isActive = activeFilter === tab.label;
+                return (
+                  <button
+                    key={tab.label}
+                    onClick={() => setActiveFilter(tab.label)}
+                    className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] whitespace-nowrap transition-all ${
+                      isActive
+                        ? 'bg-slate-900 text-white font-bold shadow-xs'
+                        : tab.alert
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                        : tab.warn
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                        : tab.success
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200/60'
+                    }`}
+                  >
+                    {tab.label} <span className="font-mono ml-0.5 text-[10px]">({tab.count})</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -244,35 +364,46 @@ export const Dashboard: React.FC = () => {
                 <div 
                   key={rec.id}
                   onClick={() => setSelectedId(rec.id)}
-                  className={`p-3.5 cursor-pointer transition-colors ${
-                    isSelected ? 'bg-rose-50/40 border-l-2 border-rose-500' : 'hover:bg-slate-50'
+                  className={`p-3.5 cursor-pointer transition-all border-l-4 ${
+                    isSelected 
+                      ? 'bg-blue-50/60 border-blue-600' 
+                      : rec.status === 'mismatch'
+                      ? 'border-rose-400 hover:bg-slate-50'
+                      : 'border-transparent hover:bg-slate-50'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`w-1.5 h-1.5 rounded-full ${
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${
                         rec.status === 'mismatch' ? 'bg-rose-500' : 
-                        rec.status === 'unreadable' ? 'bg-amber-500' : 'bg-emerald-500'
+                        rec.status === 'unreadable' ? 'bg-amber-500' : 
+                        'bg-emerald-500'
                       }`} />
-                      <span className="text-xs font-semibold text-slate-800 truncate max-w-[170px]">{rec.sender}</span>
+                      <span className="text-xs font-bold text-slate-900 truncate max-w-[160px]">{rec.sender}</span>
                     </div>
-                    <span className="text-[10px] text-slate-400">{rec.time}</span>
+                    <span className="text-[10px] font-mono text-slate-400">{rec.time}</span>
                   </div>
-                  <p className="text-[11px] text-slate-500 truncate mb-2">{rec.subject}</p>
+
+                  <p className="text-xs text-slate-600 font-medium truncate mb-2">{rec.subject}</p>
                   
-                  {/* Badges */}
-                  <div className="flex items-center gap-1.5">
-                    <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 text-[10px] rounded font-medium capitalize">
-                      {rec.category.replace('_', ' ')}
-                    </span>
-                    {rec.statusText && (
-                      <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
-                        rec.status === 'mismatch' ? 'bg-rose-100 text-rose-700' :
-                        rec.status === 'unreadable' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                      }`}>
-                        {rec.statusText}
+                  {/* Badges & ID */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-mono rounded-md">
+                        {rec.id}
                       </span>
-                    )}
+                      {rec.statusText && (
+                        <span className={`px-2 py-0.5 text-[10px] rounded-md font-semibold ${
+                          rec.status === 'mismatch' ? 'bg-rose-100 text-rose-800' :
+                          rec.status === 'unreadable' ? 'bg-amber-100 text-amber-800' : 
+                          'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {rec.statusText}
+                        </span>
+                      )}
+                    </div>
+
+                    <ArrowRight className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'text-blue-600 translate-x-0.5' : 'text-slate-400'}`} />
                   </div>
                 </div>
               );
@@ -280,76 +411,111 @@ export const Dashboard: React.FC = () => {
           </div>
         </section>
 
-        {/* Right Column: Verification Inspector */}
-        <main className="flex-1 bg-white p-6 overflow-y-auto">
+        {/* Right Column: Clean Verification Matrix */}
+        <main className="flex-1 bg-[#F8FAFC] p-6 overflow-y-auto">
           {selectedRecord.category === 'document_comparison' ? (
-            <div className="max-w-3xl space-y-6">
+            <div className="max-w-4xl space-y-6">
               
-              {/* Header Details */}
-              <div className="flex items-start justify-between">
+              {/* Header Details Card */}
+              <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-xs flex items-start justify-between">
                 <div>
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {selectedRecord.sender} · BOOKING {selectedRecord.id}
-                  </span>
-                  <h1 className="text-base font-bold text-slate-900 mt-0.5">{selectedRecord.subject}</h1>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+                      BOOKING REF: {selectedRecord.id}
+                    </span>
+                    <span className="text-xs text-slate-500">• {selectedRecord.sender}</span>
+                  </div>
+                  <h1 className="text-xl font-extrabold text-slate-900 mt-1.5 font-sans tracking-tight">{selectedRecord.subject}</h1>
                 </div>
-                <span className="text-[11px] font-medium bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                  Document comparison
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                    Document Verification
+                  </span>
+                  {selectedRecord.confidence && (
+                    <span className="text-[10px] font-mono text-slate-500">
+                      LLM Confidence: <strong className="text-slate-800">{selectedRecord.confidence.toUpperCase()}</strong>
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Status Alert Banner */}
               {selectedRecord.status === 'mismatch' && (
-                <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-lg flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl shadow-2xs flex items-start gap-3">
+                  <div className="p-2 bg-rose-100 text-rose-600 rounded-xl shrink-0">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-rose-900">Mismatch found — 1 of 7 fields differ</h4>
-                    <p className="text-[11px] text-rose-700 mt-0.5">
-                      Container count does not match between SI and draft BL.
+                    <h4 className="text-sm font-bold text-rose-950">Discrepancy Detected — Field Mismatch in Shipping Manifest</h4>
+                    <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                      The declared <strong className="underline decoration-rose-500 decoration-2">Container Count</strong> in the Shipping Instruction (SI) does not match the Bill of Lading (BL) draft. Instant resolution or carrier confirmation required.
                     </p>
                   </div>
                 </div>
               )}
 
               {selectedRecord.status === 'clear' && (
-                <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-start gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-2xs flex items-start gap-3">
+                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-emerald-900">No mismatch detected</h4>
-                    <p className="text-[11px] text-emerald-700 mt-0.5">All seven shipment parameters agree perfectly.</p>
+                    <h4 className="text-sm font-bold text-emerald-950">100% Parameter Verification Passed</h4>
+                    <p className="text-xs text-emerald-800 mt-1">All 7 critical ocean freight fields between SI and Draft BL match perfectly without discrepancy.</p>
                   </div>
                 </div>
               )}
 
-              {/* 7-Field Comparison Table */}
+              {/* 7-Field Comparison Matrix Table */}
               {selectedRecord.fields && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                    Field-by-Field Comparison
+                <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-blue-600" />
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">Parameter Comparison Matrix</h3>
+                    </div>
+                    <span className="text-[11px] font-mono text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                      7 / 7 Parameters Extracted
+                    </span>
                   </div>
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-medium">
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse font-sans">
+                      <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-mono text-[11px] uppercase tracking-wider">
                         <tr>
-                          <th className="py-2 px-3 font-semibold w-1/4">FIELD</th>
-                          <th className="py-2 px-3 font-semibold w-1/3">SI VALUE</th>
-                          <th className="py-2 px-3 font-semibold w-1/3">BL VALUE</th>
-                          <th className="py-2 px-3 font-semibold text-right">STATUS</th>
+                          <th className="py-3 px-4 font-semibold w-1/4">FIELD PARAMETER</th>
+                          <th className="py-3 px-4 font-semibold w-1/3">SI DECLARED VALUE</th>
+                          <th className="py-3 px-4 font-semibold w-1/3">BL DRAFT VALUE</th>
+                          <th className="py-3 px-4 font-semibold text-right">VERDICT</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-slate-200/60 font-mono text-xs">
                         {Object.entries(selectedRecord.fields).map(([key, item]) => (
-                          <tr key={key} className={item.match ? 'hover:bg-slate-50/50' : 'bg-rose-50/30'}>
-                            <td className="py-2.5 px-3 font-medium text-slate-700">{item.label}</td>
-                            <td className="py-2.5 px-3 text-slate-900">{item.siValue}</td>
-                            <td className={`py-2.5 px-3 ${!item.match ? 'text-rose-600 font-semibold' : 'text-slate-900'}`}>
+                          <tr 
+                            key={key} 
+                            className={`transition-colors ${
+                              item.match 
+                                ? 'hover:bg-slate-50 text-slate-900' 
+                                : 'bg-rose-50/80 hover:bg-rose-100/60 text-slate-900 border-l-4 border-rose-500'
+                            }`}
+                          >
+                            <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
+                              {item.label}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-900 font-medium">{item.siValue}</td>
+                            <td className={`py-3.5 px-4 ${!item.match ? 'text-rose-700 font-bold' : 'text-slate-900 font-medium'}`}>
                               {item.blValue}
                             </td>
-                            <td className="py-2.5 px-3 text-right">
+                            <td className="py-3.5 px-4 text-right">
                               {item.match ? (
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 inline-block" />
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Match
+                                </span>
                               ) : (
-                                <XCircle className="w-3.5 h-3.5 text-rose-500 inline-block" />
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 border border-rose-200 text-rose-800 text-[10px] font-bold">
+                                  <XCircle className="w-3 h-3 text-rose-600" /> Mismatch
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -363,36 +529,40 @@ export const Dashboard: React.FC = () => {
               {/* Action Buttons */}
               <div className="flex items-center gap-3 pt-2">
                 <button 
-                  onClick={() => alert("Mismatch report confirmed!")}
-                  className="px-4 py-2 bg-[#1E2538] hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-sm"
+                  onClick={() => alert("Mismatch report confirmed and dispatched to carrier!")}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-2"
                 >
-                  Confirm mismatch report
+                  <AlertCircle className="w-4 h-4" />
+                  Confirm Mismatch & Dispatch Alert
                 </button>
+
                 <button 
                   onClick={() => alert("Case escalated to human reviewer queue")}
-                  className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs"
+                  className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all shadow-2xs"
                 >
-                  Send to human review
+                  Send to Human Review Queue
                 </button>
+
                 <button 
                   onClick={() => setShowSourceViewer(true)}
-                  className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium ml-2"
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1.5 font-semibold font-mono ml-auto py-2 px-3 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all"
                 >
-                  View source documents <ExternalLink className="w-3 h-3" />
+                  View Raw Attachments (.txt) <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Processing Trace / Reasoning Panel */}
+              {/* Processing Trace / LLM Reasoning Panel */}
               {selectedRecord.trace && (
-                <div className="pt-4 border-t border-slate-100">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                    Processing Trace
+                <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-2xs">
+                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3 font-mono">
+                    <Activity className="w-3.5 h-3.5 text-blue-600" />
+                    Automated Processing & LLM Audit Trace
                   </div>
-                  <ul className="space-y-1.5 text-xs text-slate-600">
+                  <ul className="space-y-2.5 text-xs text-slate-700 font-mono">
                     {selectedRecord.trace.map((step, idx) => (
-                      <li key={idx} className="flex items-center gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <span>{step}</span>
+                      <li key={idx} className="flex items-start gap-2.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-600 mt-1 shrink-0" />
+                        <span className="leading-relaxed">{step}</span>
                       </li>
                     ))}
                   </ul>
@@ -403,10 +573,12 @@ export const Dashboard: React.FC = () => {
           ) : (
             /* Non-comparison screen (Spam / Invoices) */
             <div className="h-full flex flex-col items-center justify-center text-center p-8">
-              <FileText className="w-10 h-10 text-slate-300 mb-3" />
-              <h3 className="text-sm font-semibold text-slate-700">Email Triage Only</h3>
-              <p className="text-xs text-slate-400 max-w-sm mt-1">
-                This item was classified as <strong className="text-slate-600">{selectedRecord.category}</strong>. No document comparison required.
+              <div className="p-4 bg-slate-100 rounded-2xl border border-slate-200 mb-4 text-slate-500">
+                <FileText className="w-10 h-10 stroke-1" />
+              </div>
+              <h3 className="text-base font-bold text-slate-800">Non-Manifest Triage Item</h3>
+              <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
+                This message was categorized as <strong className="text-blue-700 font-mono">{selectedRecord.category}</strong>. Document diff matching is skipped automatically.
               </p>
             </div>
           )}
@@ -417,10 +589,10 @@ export const Dashboard: React.FC = () => {
       {/* File Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-xl overflow-hidden">
+          <div className="relative w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
             <button 
               onClick={() => setShowUploadModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -438,23 +610,28 @@ export const Dashboard: React.FC = () => {
 
       {/* Raw Source Document Side Drawer */}
       {showSourceViewer && selectedRecord.rawSiText && (
-        <div className="fixed inset-y-0 right-0 w-96 bg-white border-l border-slate-200 shadow-2xl z-50 flex flex-col">
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-            <h3 className="text-xs font-bold text-slate-800">Raw Attachment Sources</h3>
-            <button onClick={() => setShowSourceViewer(false)}>
-              <X className="w-4 h-4 text-slate-400 hover:text-slate-600" />
+        <div className="fixed inset-y-0 right-0 w-112 bg-white border-l border-slate-200 shadow-2xl z-50 flex flex-col">
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-blue-600" />
+              <h3 className="text-xs font-bold text-slate-900 font-mono">Raw Attachment Documents</h3>
+            </div>
+            <button onClick={() => setShowSourceViewer(false)} className="text-slate-400 hover:text-slate-700">
+              <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="p-4 flex-1 overflow-y-auto space-y-4 font-mono text-[11px]">
+
+          <div className="p-5 flex-1 overflow-y-auto space-y-5 font-mono text-xs">
             <div>
-              <span className="font-sans font-bold text-[10px] text-slate-400 uppercase">SI Attachment (.txt)</span>
-              <pre className="p-2.5 bg-slate-50 border border-slate-200 rounded mt-1 whitespace-pre-wrap text-slate-700">
+              <span className="font-sans font-bold text-[10px] text-blue-700 uppercase tracking-wider">SI Attachment Raw Text (.txt)</span>
+              <pre className="p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1.5 whitespace-pre-wrap text-slate-800 text-[11px] leading-relaxed font-mono">
                 {selectedRecord.rawSiText}
               </pre>
             </div>
+
             <div>
-              <span className="font-sans font-bold text-[10px] text-slate-400 uppercase">BL Draft (.txt)</span>
-              <pre className="p-2.5 bg-slate-50 border border-slate-200 rounded mt-1 whitespace-pre-wrap text-slate-700">
+              <span className="font-sans font-bold text-[10px] text-blue-700 uppercase tracking-wider">BL Draft Attachment Raw Text (.txt)</span>
+              <pre className="p-3 bg-slate-50 border border-slate-200 rounded-xl mt-1.5 whitespace-pre-wrap text-slate-800 text-[11px] leading-relaxed font-mono">
                 {selectedRecord.rawBlText}
               </pre>
             </div>
