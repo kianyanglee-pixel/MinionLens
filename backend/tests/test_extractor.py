@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from docx import Document
 
-from app.extractor import extract_fields, _text_from_docx, _text_from_pdf
+from app.extractor import extract_fields, extract_field_pair, _text_from_docx, _text_from_pdf
 
 
 def _fake_inbox(read_text=None, read_bytes=None):
@@ -12,6 +12,23 @@ def _fake_inbox(read_text=None, read_bytes=None):
         read_text=lambda path: read_text,
         read_bytes=lambda path: read_bytes,
     )
+
+
+def _fake_inbox_multi(text_by_path=None, bytes_by_path=None):
+    text_by_path = text_by_path or {}
+    bytes_by_path = bytes_by_path or {}
+    return SimpleNamespace(
+        read_text=lambda path: text_by_path[path],
+        read_bytes=lambda path: bytes_by_path.get(path, b""),
+    )
+
+
+def _empty_fields():
+    return {
+        "shipper": None, "consignee": None, "notify_party": None,
+        "port_of_loading": None, "port_of_discharge": None,
+        "container_count": None, "gross_weight_kg": None,
+    }
 
 
 def test_text_from_docx_extracts_paragraphs_and_tables():
@@ -101,3 +118,50 @@ def test_extract_fields_txt_happy_path_returns_source_text():
     assert result["found"]["shipper"] is True
     assert result["found"]["consignee"] is False
     assert result["text"] == source_text
+
+
+# -- extract_field_pair: one combined LLM call for SI+BL together (§6.4) ----
+
+def test_extract_field_pair_both_readable_makes_exactly_one_llm_call():
+    si_path, bl_path = "attachments/email_005_SI.txt", "attachments/email_005_BL.txt"
+    inbox = _fake_inbox_multi({si_path: "Shipper: Acme", bl_path: "Shipper: Acme Corp"})
+    combined_response = {
+        "si": {**_empty_fields(), "shipper": "Acme"},
+        "bl": {**_empty_fields(), "shipper": "Acme Corp"},
+    }
+
+    with patch("app.extractor.ask_json", return_value=combined_response) as mock_ask:
+        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
+
+    mock_ask.assert_called_once()
+    assert si_result["ok"] is True
+    assert bl_result["ok"] is True
+    assert si_result["fields"]["shipper"] == "Acme"
+    assert bl_result["fields"]["shipper"] == "Acme Corp"
+
+
+def test_extract_field_pair_falls_back_to_single_call_when_one_side_unreadable():
+    si_path, bl_path = "attachments/email_006_SI.pdf", "attachments/email_006_BL.txt"
+    inbox = _fake_inbox_multi({bl_path: "Shipper: Acme"}, {si_path: b"scanned-image-only"})
+
+    with patch("app.extractor._text_from_pdf", return_value=""), \
+         patch("app.extractor.ask_json", return_value={**_empty_fields(), "shipper": "Acme"}) as mock_ask:
+        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
+
+    assert si_result["ok"] is False
+    assert si_result["error"] == "unreadable"
+    assert bl_result["ok"] is True
+    assert bl_result["fields"]["shipper"] == "Acme"
+    mock_ask.assert_called_once()  # only for the BL side — no wasted combined attempt
+
+
+def test_extract_field_pair_both_unreadable_makes_no_llm_call():
+    si_path, bl_path = "attachments/email_007_SI.pptx", "attachments/email_007_BL.csv"
+    inbox = _fake_inbox_multi()
+
+    with patch("app.extractor.ask_json") as mock_ask:
+        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
+
+    mock_ask.assert_not_called()
+    assert si_result["ok"] is False
+    assert bl_result["ok"] is False
