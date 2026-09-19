@@ -65,7 +65,19 @@ def test_extract_fields_pdf_with_no_text_layer_is_unreadable():
         "fields": {},
         "found": {},
         "text": "",
+        "processing_failure": False,
     }
+
+
+def test_extract_fields_flags_llm_parse_failure_as_processing_failure():
+    inbox = _fake_inbox(read_text="Shipper: Acme")
+
+    with patch("app.extractor.ask_json", return_value={"error": "invalid_json", "raw": "not json"}):
+        result = extract_fields(inbox, "attachments/email_004_SI.txt")
+
+    assert result["ok"] is False
+    assert result["processing_failure"] is True
+    assert result["error"] == "processing_failure"
 
 
 def test_extract_fields_txt_happy_path_returns_source_text():
