@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from llm import ask_json
+from .llm import ask_json
 
 FIELD_NAMES = (
     "shipper",
