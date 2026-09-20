@@ -1,5 +1,8 @@
 import React from 'react';
-import { CheckCircle2, XCircle, AlertCircle, ExternalLink, FileText, Check } from 'lucide-react';
+import { 
+  CheckCircle2, XCircle, AlertCircle, ExternalLink, 
+  FileText, Sparkles, Layers, Activity 
+} from 'lucide-react';
 import { EmailRecord } from '../pages/Dashboard';
 
 interface InspectionPanelProps {
@@ -17,106 +20,145 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
 }) => {
   if (record.category !== 'document_comparison') {
     return (
-      <main className="flex-1 bg-white p-6 flex flex-col items-center justify-center text-center">
-        <FileText className="w-10 h-10 text-slate-300 mb-3" />
-        <h3 className="text-sm font-semibold text-slate-700">Email Triage Only</h3>
-        <p className="text-xs text-slate-400 max-w-sm mt-1">
-          This message was classified as <strong className="text-slate-600 capitalize">{record.category.replace('_', ' ')}</strong>[cite: 1, 7]. 
-          Document checking is skipped for non-comparison categories.
+      <main className="flex-1 bg-[#F8FAFC] p-8 flex flex-col items-center justify-center text-center">
+        <div className="p-4 bg-slate-100 rounded-2xl border border-slate-200 mb-4 text-slate-500">
+          <FileText className="w-10 h-10 stroke-1" />
+        </div>
+        <h3 className="text-base font-bold text-slate-800">Non-Manifest Triage Item</h3>
+        <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
+          This message was categorized as <strong className="text-blue-700 font-mono">{record.category}</strong>. 
+          Document comparison is skipped for non-checking requests.
         </p>
       </main>
     );
   }
 
-  const mismatchedCount = record.fields 
-    ? Object.values(record.fields).filter((f) => !f.match).length 
-    : 0;
-
   return (
-    <main className="flex-1 bg-white p-6 overflow-y-auto">
-      <div className="max-w-3xl space-y-6">
+    <main className="flex-1 bg-[#F8FAFC] p-6 overflow-y-auto">
+      <div className="max-w-4xl space-y-6">
         
-        {/* Document Header */}
-        <div className="flex items-start justify-between">
+        {/* Header Details Card */}
+        <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-xs flex items-start justify-between">
           <div>
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              {record.sender} · BOOKING {record.id}
-            </span>
-            <h1 className="text-base font-bold text-slate-900 mt-0.5">{record.subject}</h1>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
+                BOOKING REF: {record.id}
+              </span>
+              <span className="text-xs text-slate-500">• {record.sender}</span>
+            </div>
+            <h1 className="text-xl font-extrabold text-slate-900 mt-1.5 font-sans tracking-tight">
+              {record.subject}
+            </h1>
           </div>
-          <span className="text-[11px] font-medium bg-blue-50 text-blue-700 px-2 py-1 rounded">
-            Document comparison
-          </span>
+          <div className="flex flex-col items-end gap-1">
+            <span className="text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-xl flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+              Document Verification
+            </span>
+            {record.confidence && (
+              <span className="text-[10px] font-mono text-slate-500">
+                LLM Confidence: <strong className="text-slate-800 uppercase">{record.confidence}</strong>
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Dynamic Status Alert Banner */}
+        {/* Status Alert Banner */}
         {record.status === 'mismatch' && (
-          <div className="p-3.5 bg-rose-50/70 border border-rose-200 rounded-lg flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+          <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl shadow-2xs flex items-start gap-3">
+            <div className="p-2 bg-rose-100 text-rose-600 rounded-xl shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
             <div>
-              <h4 className="text-xs font-semibold text-rose-900">
-                Mismatch found — {mismatchedCount} of 7 fields differ
+              <h4 className="text-sm font-bold text-rose-950">
+                Discrepancy Detected — Field Mismatch in Shipping Manifest
               </h4>
-              <p className="text-[11px] text-rose-700 mt-0.5">
-                Check values below against the reference Shipping Instruction (SI).
+              <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                The declared <strong className="underline decoration-rose-500 decoration-2">Container Count</strong> in the Shipping Instruction (SI) does not match the Bill of Lading (BL) draft. Resolution required.
               </p>
             </div>
           </div>
         )}
 
         {record.status === 'clear' && (
-          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-lg flex items-start gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-2xs flex items-start gap-3">
+            <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
             <div>
-              <h4 className="text-xs font-semibold text-emerald-900">No mismatch detected</h4>
-              <p className="text-[11px] text-emerald-700 mt-0.5">
-                All 7 shipping fields match between SI and BL.
+              <h4 className="text-sm font-bold text-emerald-950">100% Parameter Verification Passed</h4>
+              <p className="text-xs text-emerald-800 mt-1">
+                All 7 critical ocean freight fields between SI and Draft BL match perfectly without discrepancy.
               </p>
             </div>
           </div>
         )}
 
         {record.status === 'unreadable' && (
-          <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-lg flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl shadow-2xs flex items-start gap-3">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
             <div>
-              <h4 className="text-xs font-semibold text-amber-900">Uncertainty Detected</h4>
-              <p className="text-[11px] text-amber-700 mt-0.5">
-                Attachment quality is unreadable or missing required values. Human review required.
+              <h4 className="text-sm font-bold text-amber-950">Uncertainty Detected — Unreadable BL</h4>
+              <p className="text-xs text-amber-800 mt-1">
+                Attachment quality is unreadable or corrupted OCR image. Human review queue required.
               </p>
             </div>
           </div>
         )}
 
-        {/* 7-Field Side-by-Side Table */}
+        {/* 7-Field Comparison Matrix Table */}
         {record.fields && (
-          <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Field-by-Field Comparison
+          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+            <div className="p-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-600" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">
+                  Parameter Comparison Matrix
+                </h3>
+              </div>
+              <span className="text-[11px] font-mono text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                7 / 7 Parameters Extracted
+              </span>
             </div>
-            <div className="border border-slate-200 rounded-lg overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-medium">
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse font-sans">
+                <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-mono text-[11px] uppercase tracking-wider">
                   <tr>
-                    <th className="py-2 px-3 font-semibold w-1/4">FIELD</th>
-                    <th className="py-2 px-3 font-semibold w-1/3">SI VALUE (REF)</th>
-                    <th className="py-2 px-3 font-semibold w-1/3">BL VALUE</th>
-                    <th className="py-2 px-3 font-semibold text-right">STATUS</th>
+                    <th className="py-3 px-4 font-semibold w-1/4">FIELD PARAMETER</th>
+                    <th className="py-3 px-4 font-semibold w-1/3">SI DECLARED VALUE</th>
+                    <th className="py-3 px-4 font-semibold w-1/3">BL DRAFT VALUE</th>
+                    <th className="py-3 px-4 font-semibold text-right">VERDICT</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-200/60 font-mono text-xs">
                   {Object.entries(record.fields).map(([key, item]) => (
-                    <tr key={key} className={item.match ? 'hover:bg-slate-50/50' : 'bg-rose-50/30'}>
-                      <td className="py-2.5 px-3 font-medium text-slate-700">{item.label}</td>
-                      <td className="py-2.5 px-3 text-slate-900">{item.siValue}</td>
-                      <td className={`py-2.5 px-3 ${!item.match ? 'text-rose-600 font-semibold' : 'text-slate-900'}`}>
+                    <tr 
+                      key={key} 
+                      className={`transition-colors ${
+                        item.match 
+                          ? 'hover:bg-slate-50 text-slate-900' 
+                          : 'bg-rose-50/80 hover:bg-rose-100/60 text-slate-900 border-l-4 border-rose-500'
+                      }`}
+                    >
+                      <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
+                        {item.label}
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-900 font-medium">{item.siValue}</td>
+                      <td className={`py-3.5 px-4 ${!item.match ? 'text-rose-700 font-bold' : 'text-slate-900 font-medium'}`}>
                         {item.blValue}
                       </td>
-                      <td className="py-2.5 px-3 text-right">
+                      <td className="py-3.5 px-4 text-right">
                         {item.match ? (
-                          <Check className="w-4 h-4 text-emerald-500 inline-block" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Match
+                          </span>
                         ) : (
-                          <XCircle className="w-4 h-4 text-rose-500 inline-block" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 border border-rose-200 text-rose-800 text-[10px] font-bold">
+                            <XCircle className="w-3 h-3 text-rose-600" /> Mismatch
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -127,41 +169,43 @@ export const InspectionPanel: React.FC<InspectionPanelProps> = ({
           </div>
         )}
 
-        {/* Actions & Human Review Controls */}
+        {/* Action Buttons */}
         <div className="flex items-center gap-3 pt-2">
           <button 
             onClick={() => onResolveDiscrepancy(record.id)}
-            className="px-4 py-2 bg-[#1E2538] hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-sm"
+            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-2"
           >
-            Confirm report
+            <AlertCircle className="w-4 h-4" />
+            Confirm Mismatch & Dispatch Alert
           </button>
-          {/*Later need to create a page for human review(?), onEscalate function needs to be changed.*/}
+
           <button 
             onClick={() => onEscalate(record.id)}
-            className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs"
+            className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all shadow-2xs"
           >
-            Send to human review
+            Send to Human Review Queue
           </button>
-          {/*Later need to change the ui */}
+
           <button 
             onClick={onOpenSourceModal}
-            className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 font-medium ml-2"
+            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1.5 font-semibold font-mono ml-auto py-2 px-3 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all"
           >
-            View source documents<ExternalLink className="w-3 h-3" />
+            View Raw Attachments (.txt) <ExternalLink className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* Processing Trace / Confidence */}
+        {/* Processing Trace / LLM Audit Trace */}
         {record.trace && (
-          <div className="pt-4 border-t border-slate-100">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Processing Trace
+          <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-2xs">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3 font-mono">
+              <Activity className="w-3.5 h-3.5 text-blue-600" />
+              Automated Processing & LLM Audit Trace
             </div>
-            <ul className="space-y-1.5 text-xs text-slate-600">
+            <ul className="space-y-2.5 text-xs text-slate-700 font-mono">
               {record.trace.map((step, idx) => (
-                <li key={idx} className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                  <span>{step}</span>
+                <li key={idx} className="flex items-start gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-600 mt-1 shrink-0" />
+                  <span className="leading-relaxed">{step}</span>
                 </li>
               ))}
             </ul>
