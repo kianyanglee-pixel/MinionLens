@@ -48,11 +48,15 @@ def _missing_attachment_result(si_path, bl_path):
     }
 
 
-def _load_emails(inbox, limit=None):
+def _load_emails(inbox, limit=None, email_id=None):
     """inbox.emails() lists the whole inbox, then downloads every single
     email JSON from Storage one at a time — fine for a full batch run, way
     too slow for a limit-bounded smoke test. When limited, list filenames
-    only (cheap) and download just the first N."""
+    only (cheap) and download just the first N. email_id downloads just
+    that one email, skipping the listing entirely."""
+    if email_id is not None:
+        return [inbox.get(email_id)]
+
     if limit is None:
         return inbox.emails()
 
@@ -121,16 +125,18 @@ def create_run():
     upserting each email's row (idempotent on rerun/crash-resume) and writing
     the frozen submission.json snapshot once at the end.
 
-    Optional ?limit=N processes only the first N emails — for smoke-testing
-    the pipeline/DB wiring cheaply. A limited run still writes DB rows (so
-    you can exercise the API), but deliberately skips submission.json: that
-    file is the frozen, graded snapshot and must never be overwritten with a
-    partial batch."""
+    Optional ?limit=N processes only the first N emails, or ?email_id=X
+    processes just that one email — both for smoke-testing the pipeline/DB
+    wiring cheaply. Either way the run still writes DB rows (so you can
+    exercise the API), but deliberately skips submission.json: that file is
+    the frozen, graded snapshot and must never be overwritten with a partial
+    batch."""
     inbox = Inbox("supabase")
     run_id = db.create_run()
 
     limit = request.args.get("limit", type=int)
-    emails = _load_emails(inbox, limit)
+    email_id = request.args.get("email_id")
+    emails = _load_emails(inbox, limit, email_id)
 
     submission = {}
     mismatch_count = 0
@@ -151,7 +157,7 @@ def create_run():
 
     db.finalize_run(run_id, email_count, mismatch_count, needs_review_count)
 
-    submission_written = limit is None
+    submission_written = limit is None and email_id is None
     if submission_written:
         inbox.submit(submission)
 
