@@ -42,6 +42,23 @@ DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+# -- Ollama (local) -----------------------------------------------------------
+# Runs entirely on your own machine via `ollama serve` — free, no API key,
+# and no rate limit/quota from a third party, since nothing leaves your
+# computer. Trade-off: speed and output quality depend on your hardware and
+# the model you pull, so worth testing on a few emails before trusting it for
+# a full batch run. Needs the model pulled first, e.g. `ollama pull llama3.1`.
+# Uses Ollama's OpenAI-compatible endpoint, so it shares the OpenRouter/OpenAI
+# call shape below — no new dependency needed.
+# Optional OLLAMA_BASE_URL/OLLAMA_MODEL in .env (sane local defaults if unset).
+# from openai import OpenAI
+#
+# client = OpenAI(
+#     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+#     api_key="ollama",  # required by the client library; Ollama itself ignores it
+# )
+# DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+
 
 def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -> dict:
     """Gemini (direct) call shape. If you switch to the OpenRouter or OpenAI
@@ -70,9 +87,13 @@ def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -
         return {"error": "invalid_json", "raw": response.text}
 
 
-# -- ask_json for the OpenRouter/OpenAI (direct) blocks above, if you switch
-# -- to either of those (both go through the `openai` package's
-# -- chat.completions API, so this one body covers either) -----------------
+# -- ask_json for the OpenRouter/OpenAI (direct)/Ollama blocks above, if you
+# -- switch to any of those (all three go through the `openai` package's
+# -- chat.completions API, so this one body covers all of them) ------------
+# -- NOTE for Ollama: not every local model reliably honors
+# -- response_format={"type": "json_object"} the way hosted models do — if
+# -- you see a lot of {"error": "invalid_json"} results, try a model known
+# -- for good JSON-mode support (e.g. llama3.1) before assuming it's a bug.
 # def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -> dict:
 #     for attempt in range(MAX_RETRIES):
 #         try:
