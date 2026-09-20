@@ -277,7 +277,7 @@ export const Dashboard: React.FC = () => {
             >
               <X className="w-5 h-5" />
             </button>
-            <FileUpload onIngestBatch={handleBatchIngest} />
+            <FileUpload onSuccess={() => setShowUploadModal(false)}/>
           </div>
         </div>
       )}
