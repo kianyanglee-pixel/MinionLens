@@ -1,0 +1,959 @@
+======================================================================
+THE INVIGILATOR — Pipeline Report Card
+Evaluated at: 2026-09-20T15:05:44.470159+00:00
+======================================================================
+
+Emails in answer key:     520
+Emails in submission:     520
+Emails actually graded:   520 (100.0% coverage)
+  -> Percent of our answer-key emails that the pipeline actually produced a result for.
+Missing from submission: none
+Extra in submission, not in answer key: none
+
+----------------------------------------------------------------------
+CATEGORY — what type of email it thought this was
+(BL_COMPARISON / SI_REQUEST / INVOICE_QUERY / GENERAL / SPAM)
+----------------------------------------------------------------------
+
+Accuracy: 72.9% (379/520 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 0.739
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  BL_COMPARISON        precision 1.00   recall 0.51   f1 0.68   (220 in answer key)
+  GENERAL              precision 0.45   recall 0.98   f1 0.61   (60 in answer key)
+  INVOICE_QUERY        precision 0.84   recall 0.56   f1 0.67   (75 in answer key)
+  SI_REQUEST           precision 0.71   recall 1.00   f1 0.83   (125 in answer key)
+  SPAM                 precision 0.82   recall 1.00   f1 0.90   (40 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual BL_COMPARISON        -> predicted: BL_COMPARISON=113, GENERAL=40, INVOICE_QUERY=8, SI_REQUEST=51, SPAM=8
+  actual GENERAL              -> predicted: GENERAL=59, SPAM=1
+  actual INVOICE_QUERY        -> predicted: GENERAL=33, INVOICE_QUERY=42
+  actual SI_REQUEST           -> predicted: SI_REQUEST=125
+  actual SPAM                 -> predicted: SPAM=40
+
+----------------------------------------------------------------------
+STATUS — the overall verdict on the shipment documents
+(OK / MISMATCH / NEEDS_REVIEW)
+----------------------------------------------------------------------
+
+Accuracy: 5.8% (30/520 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 0.1443
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  MISMATCH             precision 1.00   recall 0.22   f1 0.36   (46 in answer key)
+  NEEDS_REVIEW         precision 0.11   recall 0.50   f1 0.18   (20 in answer key)
+  OK                   precision 1.00   recall 0.02   f1 0.04   (454 in answer key)
+  null                 precision 0.00   recall 0.00   f1 0.00   (0 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual MISMATCH             -> predicted: MISMATCH=10, NEEDS_REVIEW=24, null=12
+  actual NEEDS_REVIEW         -> predicted: NEEDS_REVIEW=10, null=10
+  actual OK                   -> predicted: NEEDS_REVIEW=59, OK=10, null=385
+  actual null                 -> predicted: (nothing)
+
+----------------------------------------------------------------------
+REVIEW_REASON — why it asked a human to take a look
+(only set when status is NEEDS_REVIEW)
+----------------------------------------------------------------------
+
+Accuracy: 82.1% (427/520 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 0.2654
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  missing_attachment   precision 0.16   recall 1.00   f1 0.28   (5 in answer key)
+  missing_value        precision 0.08   recall 1.00   f1 0.15   (5 in answer key)
+  null                 precision 0.98   recall 0.83   f1 0.90   (500 in answer key)
+  unreadable           precision 0.00   recall 0.00   f1 0.00   (5 in answer key)
+  wrong_doc_type       precision 0.00   recall 0.00   f1 0.00   (5 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual missing_attachment   -> predicted: missing_attachment=5
+  actual missing_value        -> predicted: missing_value=5
+  actual null                 -> predicted: missing_attachment=26, missing_value=57, null=417
+  actual unreadable           -> predicted: null=5
+  actual wrong_doc_type       -> predicted: null=5
+
+----------------------------------------------------------------------
+DEFECT_FIELDS — which specific fields it flagged as broken
+----------------------------------------------------------------------
+
+Exact-match accuracy: 92.7%
+  -> How often it flagged the exact right set of broken fields — nothing missing, nothing extra.
+Mean Jaccard overlap: 0.9288
+  -> On average, how much its flagged fields overlapped with the truly broken ones — partial credit allowed.
+
+Per-field breakdown (For each field name: how reliably it gets correctly flagged as broken, across every email.):
+  consignee            precision 0.00   recall 0.00
+  container_count      precision 1.00   recall 0.21
+  gross_weight_kg      precision 1.00   recall 0.08
+  notify_party         precision 1.00   recall 0.12
+  port_of_discharge    precision 1.00   recall 0.31
+  port_of_loading      precision 1.00   recall 0.33
+  shipper              precision 1.00   recall 0.14
+
+----------------------------------------------------------------------
+HAS_DEFECT — yes/no, did it think this shipment had a problem
+----------------------------------------------------------------------
+
+Accuracy: 93.1%
+  -> How often 'has a defect or not' matched the real answer, out of every email checked.
+Precision: 1.0
+  -> When it raised a defect flag, how often that flag turned out to be correct.
+Recall: 0.2174
+  -> Out of every email that truly had a defect, how many it actually caught.
+F1: 0.3571
+  -> One score balancing precision and recall together, so neither can be gamed alone.
+Cohen's Kappa: 0.3362
+  -> How much better than random guessing this is — 0 means pure luck, 1 means perfect.
+
+Confusion matrix (Splits results into caught defects, false alarms, missed defects, and correctly cleared emails.):
+  caught defects (true positive):  10
+  false alarms (false positive):   0
+  correctly cleared (true negative): 474
+  missed defects (false negative): 36
+
+======================================================================
+OVERALL SUMMARY
+======================================================================
+
+Row-level exact match: 5.4% (28/520)
+  -> Percent of emails where every single field was predicted correctly, not just one or two.
+Processing-failure rate: 0.0% (0 emails)
+  -> Percent of emails the pipeline itself choked on — a system hiccup, not a wrong content guess.
+Coverage: 100.0%
+  -> Percent of our answer-key emails that the pipeline actually produced a result for.
+======================================================================
+
+======================================================================
+MISTAKES
+======================================================================
+
+CATEGORY MISTAKES (141 total):
+  email_001: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_003: actual=BL_COMPARISON, predicted=GENERAL
+  email_004: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_006: actual=BL_COMPARISON, predicted=GENERAL
+  email_013: actual=BL_COMPARISON, predicted=GENERAL
+  email_017: actual=INVOICE_QUERY, predicted=GENERAL
+  email_018: actual=BL_COMPARISON, predicted=GENERAL
+  email_024: actual=INVOICE_QUERY, predicted=GENERAL
+  email_036: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_038: actual=BL_COMPARISON, predicted=GENERAL
+  email_041: actual=INVOICE_QUERY, predicted=GENERAL
+  email_043: actual=BL_COMPARISON, predicted=GENERAL
+  email_045: actual=INVOICE_QUERY, predicted=GENERAL
+  email_047: actual=BL_COMPARISON, predicted=SPAM
+  email_048: actual=INVOICE_QUERY, predicted=GENERAL
+  email_049: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_051: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_052: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_055: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_056: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_058: actual=BL_COMPARISON, predicted=GENERAL
+  email_061: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_063: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_066: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_069: actual=INVOICE_QUERY, predicted=GENERAL
+  email_088: actual=BL_COMPARISON, predicted=SPAM
+  email_090: actual=BL_COMPARISON, predicted=GENERAL
+  email_092: actual=BL_COMPARISON, predicted=GENERAL
+  email_097: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_100: actual=BL_COMPARISON, predicted=SPAM
+  email_102: actual=INVOICE_QUERY, predicted=GENERAL
+  email_109: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_114: actual=BL_COMPARISON, predicted=GENERAL
+  email_129: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_136: actual=BL_COMPARISON, predicted=GENERAL
+  email_141: actual=BL_COMPARISON, predicted=GENERAL
+  email_152: actual=BL_COMPARISON, predicted=GENERAL
+  email_158: actual=BL_COMPARISON, predicted=GENERAL
+  email_161: actual=BL_COMPARISON, predicted=GENERAL
+  email_165: actual=INVOICE_QUERY, predicted=GENERAL
+  email_167: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_169: actual=INVOICE_QUERY, predicted=GENERAL
+  email_170: actual=INVOICE_QUERY, predicted=GENERAL
+  email_171: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_176: actual=BL_COMPARISON, predicted=GENERAL
+  email_178: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_179: actual=INVOICE_QUERY, predicted=GENERAL
+  email_186: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_189: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_190: actual=BL_COMPARISON, predicted=GENERAL
+  email_195: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_199: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_207: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_210: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_211: actual=INVOICE_QUERY, predicted=GENERAL
+  email_216: actual=INVOICE_QUERY, predicted=GENERAL
+  email_220: actual=BL_COMPARISON, predicted=GENERAL
+  email_224: actual=INVOICE_QUERY, predicted=GENERAL
+  email_225: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_229: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_237: actual=BL_COMPARISON, predicted=SPAM
+  email_242: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_247: actual=BL_COMPARISON, predicted=GENERAL
+  email_250: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_261: actual=BL_COMPARISON, predicted=GENERAL
+  email_263: actual=BL_COMPARISON, predicted=GENERAL
+  email_268: actual=INVOICE_QUERY, predicted=GENERAL
+  email_271: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_281: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_282: actual=BL_COMPARISON, predicted=SPAM
+  email_285: actual=INVOICE_QUERY, predicted=GENERAL
+  email_288: actual=BL_COMPARISON, predicted=GENERAL
+  email_296: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_301: actual=BL_COMPARISON, predicted=GENERAL
+  email_303: actual=INVOICE_QUERY, predicted=GENERAL
+  email_304: actual=INVOICE_QUERY, predicted=GENERAL
+  email_305: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_312: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_314: actual=INVOICE_QUERY, predicted=GENERAL
+  email_319: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_321: actual=BL_COMPARISON, predicted=GENERAL
+  email_324: actual=BL_COMPARISON, predicted=GENERAL
+  email_331: actual=INVOICE_QUERY, predicted=GENERAL
+  email_335: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_337: actual=BL_COMPARISON, predicted=GENERAL
+  email_341: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_354: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_355: actual=INVOICE_QUERY, predicted=GENERAL
+  email_367: actual=BL_COMPARISON, predicted=GENERAL
+  email_369: actual=INVOICE_QUERY, predicted=GENERAL
+  email_372: actual=INVOICE_QUERY, predicted=GENERAL
+  email_384: actual=BL_COMPARISON, predicted=GENERAL
+  email_385: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_386: actual=INVOICE_QUERY, predicted=GENERAL
+  email_389: actual=INVOICE_QUERY, predicted=GENERAL
+  email_394: actual=GENERAL, predicted=SPAM
+  email_398: actual=BL_COMPARISON, predicted=GENERAL
+  email_405: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_406: actual=INVOICE_QUERY, predicted=GENERAL
+  email_408: actual=BL_COMPARISON, predicted=GENERAL
+  email_410: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_411: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_419: actual=BL_COMPARISON, predicted=GENERAL
+  email_421: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_422: actual=INVOICE_QUERY, predicted=GENERAL
+  email_423: actual=BL_COMPARISON, predicted=GENERAL
+  email_425: actual=INVOICE_QUERY, predicted=GENERAL
+  email_436: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_439: actual=INVOICE_QUERY, predicted=GENERAL
+  email_440: actual=BL_COMPARISON, predicted=GENERAL
+  email_442: actual=BL_COMPARISON, predicted=GENERAL
+  email_444: actual=BL_COMPARISON, predicted=SPAM
+  email_446: actual=BL_COMPARISON, predicted=SPAM
+  email_451: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_452: actual=INVOICE_QUERY, predicted=GENERAL
+  email_454: actual=BL_COMPARISON, predicted=GENERAL
+  email_456: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_458: actual=INVOICE_QUERY, predicted=GENERAL
+  email_465: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_471: actual=INVOICE_QUERY, predicted=GENERAL
+  email_474: actual=BL_COMPARISON, predicted=SPAM
+  email_476: actual=BL_COMPARISON, predicted=GENERAL
+  email_481: actual=BL_COMPARISON, predicted=GENERAL
+  email_482: actual=BL_COMPARISON, predicted=INVOICE_QUERY
+  email_483: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_486: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_490: actual=INVOICE_QUERY, predicted=GENERAL
+  email_493: actual=BL_COMPARISON, predicted=GENERAL
+  email_494: actual=BL_COMPARISON, predicted=GENERAL
+  email_495: actual=BL_COMPARISON, predicted=GENERAL
+  email_496: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_501: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_502: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_503: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_504: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_505: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_511: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_512: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_513: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_514: actual=BL_COMPARISON, predicted=SI_REQUEST
+  email_515: actual=BL_COMPARISON, predicted=SI_REQUEST
+
+STATUS MISTAKES (490 total):
+  email_001: actual=OK, predicted=null
+  email_002: actual=OK, predicted=null
+  email_003: actual=OK, predicted=null
+  email_004: actual=MISMATCH, predicted=null
+  email_006: actual=OK, predicted=null
+  email_007: actual=OK, predicted=null
+  email_008: actual=OK, predicted=null
+  email_009: actual=OK, predicted=NEEDS_REVIEW
+  email_010: actual=OK, predicted=null
+  email_011: actual=OK, predicted=null
+  email_012: actual=OK, predicted=null
+  email_013: actual=MISMATCH, predicted=null
+  email_014: actual=OK, predicted=null
+  email_015: actual=OK, predicted=null
+  email_016: actual=OK, predicted=NEEDS_REVIEW
+  email_017: actual=OK, predicted=null
+  email_018: actual=OK, predicted=null
+  email_019: actual=OK, predicted=null
+  email_020: actual=OK, predicted=null
+  email_021: actual=OK, predicted=null
+  email_022: actual=OK, predicted=null
+  email_023: actual=OK, predicted=null
+  email_024: actual=OK, predicted=null
+  email_025: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_026: actual=OK, predicted=null
+  email_027: actual=OK, predicted=null
+  email_028: actual=OK, predicted=null
+  email_029: actual=OK, predicted=null
+  email_030: actual=OK, predicted=null
+  email_031: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_032: actual=OK, predicted=NEEDS_REVIEW
+  email_033: actual=OK, predicted=null
+  email_035: actual=OK, predicted=null
+  email_036: actual=OK, predicted=null
+  email_037: actual=OK, predicted=null
+  email_038: actual=OK, predicted=null
+  email_039: actual=OK, predicted=null
+  email_040: actual=OK, predicted=NEEDS_REVIEW
+  email_041: actual=OK, predicted=null
+  email_042: actual=OK, predicted=null
+  email_043: actual=MISMATCH, predicted=null
+  email_045: actual=OK, predicted=null
+  email_046: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_047: actual=OK, predicted=null
+  email_048: actual=OK, predicted=null
+  email_049: actual=OK, predicted=null
+  email_050: actual=OK, predicted=NEEDS_REVIEW
+  email_051: actual=OK, predicted=null
+  email_052: actual=OK, predicted=null
+  email_053: actual=OK, predicted=null
+  email_054: actual=OK, predicted=null
+  email_055: actual=OK, predicted=null
+  email_056: actual=OK, predicted=null
+  email_057: actual=OK, predicted=null
+  email_058: actual=OK, predicted=null
+  email_059: actual=OK, predicted=NEEDS_REVIEW
+  email_060: actual=OK, predicted=null
+  email_061: actual=OK, predicted=null
+  email_062: actual=OK, predicted=null
+  email_063: actual=OK, predicted=null
+  email_064: actual=OK, predicted=NEEDS_REVIEW
+  email_066: actual=OK, predicted=null
+  email_067: actual=OK, predicted=null
+  email_068: actual=OK, predicted=NEEDS_REVIEW
+  email_069: actual=OK, predicted=null
+  email_070: actual=OK, predicted=null
+  email_072: actual=OK, predicted=null
+  email_073: actual=OK, predicted=null
+  email_074: actual=OK, predicted=null
+  email_075: actual=OK, predicted=null
+  email_076: actual=OK, predicted=null
+  email_077: actual=OK, predicted=NEEDS_REVIEW
+  email_078: actual=OK, predicted=null
+  email_079: actual=OK, predicted=null
+  email_080: actual=OK, predicted=NEEDS_REVIEW
+  email_081: actual=OK, predicted=NEEDS_REVIEW
+  email_082: actual=OK, predicted=NEEDS_REVIEW
+  email_083: actual=OK, predicted=null
+  email_084: actual=OK, predicted=null
+  email_085: actual=OK, predicted=null
+  email_086: actual=OK, predicted=null
+  email_087: actual=OK, predicted=null
+  email_088: actual=OK, predicted=null
+  email_089: actual=OK, predicted=null
+  email_090: actual=OK, predicted=null
+  email_092: actual=OK, predicted=null
+  email_093: actual=OK, predicted=null
+  email_094: actual=OK, predicted=null
+  email_095: actual=OK, predicted=NEEDS_REVIEW
+  email_096: actual=OK, predicted=NEEDS_REVIEW
+  email_097: actual=MISMATCH, predicted=null
+  email_098: actual=OK, predicted=null
+  email_099: actual=OK, predicted=null
+  email_100: actual=OK, predicted=null
+  email_101: actual=OK, predicted=null
+  email_102: actual=OK, predicted=null
+  email_103: actual=OK, predicted=null
+  email_104: actual=OK, predicted=null
+  email_105: actual=OK, predicted=NEEDS_REVIEW
+  email_106: actual=OK, predicted=null
+  email_107: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_108: actual=OK, predicted=null
+  email_109: actual=OK, predicted=null
+  email_110: actual=OK, predicted=null
+  email_112: actual=OK, predicted=null
+  email_114: actual=OK, predicted=null
+  email_115: actual=OK, predicted=null
+  email_116: actual=OK, predicted=null
+  email_117: actual=OK, predicted=null
+  email_118: actual=OK, predicted=NEEDS_REVIEW
+  email_120: actual=OK, predicted=null
+  email_121: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_122: actual=OK, predicted=null
+  email_123: actual=OK, predicted=null
+  email_124: actual=OK, predicted=null
+  email_125: actual=OK, predicted=null
+  email_126: actual=OK, predicted=null
+  email_127: actual=OK, predicted=null
+  email_129: actual=MISMATCH, predicted=null
+  email_130: actual=OK, predicted=null
+  email_131: actual=OK, predicted=null
+  email_132: actual=OK, predicted=NEEDS_REVIEW
+  email_133: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_134: actual=OK, predicted=null
+  email_135: actual=OK, predicted=null
+  email_136: actual=OK, predicted=null
+  email_137: actual=OK, predicted=null
+  email_138: actual=OK, predicted=null
+  email_139: actual=OK, predicted=null
+  email_140: actual=OK, predicted=null
+  email_141: actual=OK, predicted=null
+  email_142: actual=OK, predicted=null
+  email_143: actual=OK, predicted=NEEDS_REVIEW
+  email_144: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_145: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_146: actual=OK, predicted=NEEDS_REVIEW
+  email_147: actual=OK, predicted=null
+  email_148: actual=OK, predicted=null
+  email_149: actual=OK, predicted=null
+  email_150: actual=OK, predicted=null
+  email_151: actual=OK, predicted=null
+  email_152: actual=OK, predicted=null
+  email_153: actual=OK, predicted=null
+  email_154: actual=OK, predicted=null
+  email_155: actual=OK, predicted=null
+  email_156: actual=OK, predicted=null
+  email_157: actual=OK, predicted=null
+  email_158: actual=OK, predicted=null
+  email_159: actual=OK, predicted=null
+  email_160: actual=OK, predicted=NEEDS_REVIEW
+  email_161: actual=OK, predicted=null
+  email_162: actual=OK, predicted=null
+  email_163: actual=OK, predicted=null
+  email_164: actual=OK, predicted=null
+  email_165: actual=OK, predicted=null
+  email_166: actual=OK, predicted=null
+  email_167: actual=OK, predicted=null
+  email_168: actual=OK, predicted=null
+  email_169: actual=OK, predicted=null
+  email_170: actual=OK, predicted=null
+  email_171: actual=OK, predicted=null
+  email_172: actual=OK, predicted=null
+  email_173: actual=OK, predicted=null
+  email_174: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_176: actual=OK, predicted=null
+  email_177: actual=OK, predicted=null
+  email_178: actual=MISMATCH, predicted=null
+  email_179: actual=OK, predicted=null
+  email_180: actual=OK, predicted=null
+  email_181: actual=OK, predicted=null
+  email_182: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_183: actual=OK, predicted=null
+  email_184: actual=OK, predicted=null
+  email_185: actual=OK, predicted=null
+  email_186: actual=OK, predicted=null
+  email_187: actual=OK, predicted=NEEDS_REVIEW
+  email_188: actual=OK, predicted=null
+  email_189: actual=OK, predicted=null
+  email_190: actual=OK, predicted=null
+  email_191: actual=OK, predicted=null
+  email_192: actual=OK, predicted=null
+  email_193: actual=OK, predicted=null
+  email_194: actual=OK, predicted=null
+  email_195: actual=OK, predicted=null
+  email_196: actual=OK, predicted=null
+  email_197: actual=OK, predicted=NEEDS_REVIEW
+  email_198: actual=OK, predicted=NEEDS_REVIEW
+  email_199: actual=OK, predicted=null
+  email_200: actual=OK, predicted=null
+  email_201: actual=OK, predicted=null
+  email_202: actual=OK, predicted=null
+  email_203: actual=OK, predicted=null
+  email_204: actual=OK, predicted=null
+  email_205: actual=OK, predicted=null
+  email_206: actual=OK, predicted=null
+  email_207: actual=OK, predicted=null
+  email_208: actual=OK, predicted=NEEDS_REVIEW
+  email_209: actual=OK, predicted=null
+  email_210: actual=OK, predicted=null
+  email_211: actual=OK, predicted=null
+  email_212: actual=OK, predicted=null
+  email_213: actual=OK, predicted=null
+  email_214: actual=OK, predicted=null
+  email_215: actual=OK, predicted=null
+  email_216: actual=OK, predicted=null
+  email_217: actual=OK, predicted=null
+  email_218: actual=OK, predicted=null
+  email_219: actual=OK, predicted=null
+  email_220: actual=OK, predicted=null
+  email_221: actual=OK, predicted=null
+  email_222: actual=OK, predicted=null
+  email_223: actual=OK, predicted=NEEDS_REVIEW
+  email_224: actual=OK, predicted=null
+  email_225: actual=MISMATCH, predicted=null
+  email_226: actual=OK, predicted=null
+  email_227: actual=OK, predicted=NEEDS_REVIEW
+  email_228: actual=OK, predicted=null
+  email_229: actual=OK, predicted=null
+  email_230: actual=OK, predicted=null
+  email_231: actual=OK, predicted=null
+  email_232: actual=OK, predicted=null
+  email_233: actual=OK, predicted=null
+  email_234: actual=OK, predicted=null
+  email_235: actual=OK, predicted=NEEDS_REVIEW
+  email_236: actual=OK, predicted=null
+  email_237: actual=OK, predicted=null
+  email_238: actual=OK, predicted=null
+  email_240: actual=OK, predicted=null
+  email_241: actual=OK, predicted=null
+  email_242: actual=OK, predicted=null
+  email_243: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_244: actual=OK, predicted=null
+  email_245: actual=OK, predicted=null
+  email_246: actual=OK, predicted=null
+  email_247: actual=OK, predicted=null
+  email_248: actual=OK, predicted=null
+  email_249: actual=OK, predicted=NEEDS_REVIEW
+  email_250: actual=OK, predicted=null
+  email_251: actual=OK, predicted=null
+  email_252: actual=OK, predicted=null
+  email_253: actual=OK, predicted=null
+  email_254: actual=OK, predicted=null
+  email_255: actual=OK, predicted=null
+  email_256: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_257: actual=OK, predicted=null
+  email_258: actual=OK, predicted=null
+  email_259: actual=OK, predicted=NEEDS_REVIEW
+  email_260: actual=OK, predicted=null
+  email_261: actual=OK, predicted=null
+  email_262: actual=OK, predicted=null
+  email_263: actual=OK, predicted=null
+  email_264: actual=OK, predicted=null
+  email_265: actual=OK, predicted=NEEDS_REVIEW
+  email_266: actual=OK, predicted=null
+  email_267: actual=OK, predicted=null
+  email_268: actual=OK, predicted=null
+  email_269: actual=OK, predicted=null
+  email_270: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_271: actual=OK, predicted=null
+  email_272: actual=OK, predicted=null
+  email_273: actual=OK, predicted=NEEDS_REVIEW
+  email_274: actual=OK, predicted=null
+  email_275: actual=OK, predicted=NEEDS_REVIEW
+  email_276: actual=OK, predicted=null
+  email_277: actual=OK, predicted=null
+  email_278: actual=OK, predicted=null
+  email_279: actual=OK, predicted=null
+  email_280: actual=OK, predicted=null
+  email_281: actual=OK, predicted=null
+  email_282: actual=OK, predicted=null
+  email_283: actual=OK, predicted=null
+  email_284: actual=OK, predicted=null
+  email_285: actual=OK, predicted=null
+  email_286: actual=OK, predicted=null
+  email_287: actual=OK, predicted=null
+  email_288: actual=OK, predicted=null
+  email_289: actual=OK, predicted=null
+  email_290: actual=OK, predicted=null
+  email_291: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_292: actual=OK, predicted=NEEDS_REVIEW
+  email_293: actual=OK, predicted=null
+  email_294: actual=OK, predicted=null
+  email_295: actual=OK, predicted=null
+  email_296: actual=OK, predicted=null
+  email_297: actual=OK, predicted=null
+  email_298: actual=OK, predicted=null
+  email_299: actual=OK, predicted=NEEDS_REVIEW
+  email_300: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_301: actual=OK, predicted=null
+  email_302: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_303: actual=OK, predicted=null
+  email_304: actual=OK, predicted=null
+  email_305: actual=OK, predicted=null
+  email_306: actual=OK, predicted=null
+  email_307: actual=OK, predicted=NEEDS_REVIEW
+  email_308: actual=OK, predicted=null
+  email_309: actual=OK, predicted=NEEDS_REVIEW
+  email_310: actual=OK, predicted=null
+  email_311: actual=OK, predicted=null
+  email_312: actual=MISMATCH, predicted=null
+  email_313: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_314: actual=OK, predicted=null
+  email_315: actual=OK, predicted=null
+  email_316: actual=OK, predicted=null
+  email_317: actual=OK, predicted=null
+  email_318: actual=OK, predicted=NEEDS_REVIEW
+  email_319: actual=OK, predicted=null
+  email_320: actual=OK, predicted=null
+  email_321: actual=OK, predicted=null
+  email_322: actual=OK, predicted=null
+  email_323: actual=OK, predicted=null
+  email_324: actual=MISMATCH, predicted=null
+  email_325: actual=OK, predicted=null
+  email_326: actual=OK, predicted=NEEDS_REVIEW
+  email_327: actual=OK, predicted=null
+  email_328: actual=OK, predicted=null
+  email_329: actual=OK, predicted=null
+  email_330: actual=OK, predicted=null
+  email_331: actual=OK, predicted=null
+  email_332: actual=OK, predicted=null
+  email_333: actual=OK, predicted=null
+  email_334: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_335: actual=OK, predicted=null
+  email_336: actual=OK, predicted=null
+  email_337: actual=OK, predicted=null
+  email_338: actual=OK, predicted=null
+  email_339: actual=OK, predicted=null
+  email_340: actual=OK, predicted=null
+  email_341: actual=OK, predicted=null
+  email_342: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_343: actual=OK, predicted=NEEDS_REVIEW
+  email_344: actual=OK, predicted=null
+  email_345: actual=OK, predicted=null
+  email_346: actual=OK, predicted=null
+  email_347: actual=OK, predicted=null
+  email_348: actual=OK, predicted=NEEDS_REVIEW
+  email_349: actual=OK, predicted=NEEDS_REVIEW
+  email_350: actual=OK, predicted=NEEDS_REVIEW
+  email_351: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_352: actual=OK, predicted=null
+  email_353: actual=OK, predicted=null
+  email_354: actual=MISMATCH, predicted=null
+  email_355: actual=OK, predicted=null
+  email_356: actual=OK, predicted=null
+  email_357: actual=OK, predicted=null
+  email_358: actual=OK, predicted=null
+  email_359: actual=OK, predicted=null
+  email_360: actual=OK, predicted=null
+  email_362: actual=OK, predicted=null
+  email_363: actual=OK, predicted=null
+  email_365: actual=OK, predicted=null
+  email_366: actual=OK, predicted=null
+  email_367: actual=OK, predicted=null
+  email_368: actual=OK, predicted=null
+  email_369: actual=OK, predicted=null
+  email_370: actual=OK, predicted=null
+  email_371: actual=OK, predicted=null
+  email_372: actual=OK, predicted=null
+  email_373: actual=OK, predicted=null
+  email_374: actual=OK, predicted=null
+  email_375: actual=OK, predicted=null
+  email_376: actual=OK, predicted=null
+  email_378: actual=OK, predicted=NEEDS_REVIEW
+  email_380: actual=OK, predicted=null
+  email_381: actual=OK, predicted=NEEDS_REVIEW
+  email_382: actual=OK, predicted=null
+  email_383: actual=OK, predicted=NEEDS_REVIEW
+  email_384: actual=OK, predicted=null
+  email_385: actual=OK, predicted=null
+  email_386: actual=OK, predicted=null
+  email_387: actual=OK, predicted=null
+  email_388: actual=OK, predicted=null
+  email_389: actual=OK, predicted=null
+  email_390: actual=OK, predicted=null
+  email_391: actual=OK, predicted=NEEDS_REVIEW
+  email_392: actual=OK, predicted=null
+  email_393: actual=OK, predicted=null
+  email_394: actual=OK, predicted=null
+  email_395: actual=OK, predicted=null
+  email_396: actual=OK, predicted=null
+  email_397: actual=OK, predicted=null
+  email_398: actual=OK, predicted=null
+  email_399: actual=OK, predicted=null
+  email_400: actual=OK, predicted=null
+  email_401: actual=OK, predicted=NEEDS_REVIEW
+  email_402: actual=OK, predicted=null
+  email_403: actual=OK, predicted=null
+  email_404: actual=OK, predicted=null
+  email_405: actual=OK, predicted=null
+  email_406: actual=OK, predicted=null
+  email_407: actual=OK, predicted=NEEDS_REVIEW
+  email_408: actual=OK, predicted=null
+  email_409: actual=OK, predicted=NEEDS_REVIEW
+  email_410: actual=MISMATCH, predicted=null
+  email_411: actual=OK, predicted=null
+  email_412: actual=OK, predicted=null
+  email_413: actual=OK, predicted=null
+  email_414: actual=OK, predicted=null
+  email_415: actual=OK, predicted=null
+  email_417: actual=OK, predicted=null
+  email_418: actual=OK, predicted=null
+  email_419: actual=OK, predicted=null
+  email_420: actual=OK, predicted=null
+  email_421: actual=OK, predicted=null
+  email_422: actual=OK, predicted=null
+  email_423: actual=OK, predicted=null
+  email_424: actual=OK, predicted=NEEDS_REVIEW
+  email_425: actual=OK, predicted=null
+  email_427: actual=OK, predicted=null
+  email_428: actual=OK, predicted=NEEDS_REVIEW
+  email_429: actual=OK, predicted=null
+  email_430: actual=OK, predicted=null
+  email_431: actual=OK, predicted=null
+  email_432: actual=OK, predicted=NEEDS_REVIEW
+  email_433: actual=OK, predicted=null
+  email_434: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_435: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_436: actual=OK, predicted=null
+  email_437: actual=OK, predicted=null
+  email_438: actual=OK, predicted=null
+  email_439: actual=OK, predicted=null
+  email_440: actual=OK, predicted=null
+  email_441: actual=OK, predicted=null
+  email_442: actual=OK, predicted=null
+  email_443: actual=OK, predicted=null
+  email_444: actual=OK, predicted=null
+  email_445: actual=OK, predicted=null
+  email_446: actual=OK, predicted=null
+  email_447: actual=OK, predicted=NEEDS_REVIEW
+  email_448: actual=OK, predicted=NEEDS_REVIEW
+  email_449: actual=OK, predicted=null
+  email_450: actual=OK, predicted=null
+  email_451: actual=OK, predicted=null
+  email_452: actual=OK, predicted=null
+  email_454: actual=OK, predicted=null
+  email_455: actual=OK, predicted=null
+  email_456: actual=OK, predicted=null
+  email_457: actual=OK, predicted=null
+  email_458: actual=OK, predicted=null
+  email_459: actual=OK, predicted=NEEDS_REVIEW
+  email_460: actual=OK, predicted=null
+  email_461: actual=OK, predicted=null
+  email_462: actual=OK, predicted=NEEDS_REVIEW
+  email_463: actual=OK, predicted=null
+  email_464: actual=OK, predicted=null
+  email_465: actual=OK, predicted=null
+  email_466: actual=OK, predicted=null
+  email_467: actual=OK, predicted=null
+  email_468: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_469: actual=OK, predicted=null
+  email_470: actual=OK, predicted=null
+  email_471: actual=OK, predicted=null
+  email_472: actual=OK, predicted=null
+  email_473: actual=OK, predicted=null
+  email_474: actual=OK, predicted=null
+  email_475: actual=OK, predicted=null
+  email_476: actual=OK, predicted=null
+  email_477: actual=OK, predicted=null
+  email_478: actual=OK, predicted=null
+  email_479: actual=OK, predicted=NEEDS_REVIEW
+  email_480: actual=OK, predicted=NEEDS_REVIEW
+  email_481: actual=MISMATCH, predicted=null
+  email_482: actual=OK, predicted=null
+  email_483: actual=OK, predicted=null
+  email_484: actual=OK, predicted=null
+  email_485: actual=OK, predicted=null
+  email_486: actual=OK, predicted=null
+  email_487: actual=OK, predicted=null
+  email_488: actual=OK, predicted=null
+  email_489: actual=OK, predicted=null
+  email_490: actual=OK, predicted=null
+  email_491: actual=OK, predicted=NEEDS_REVIEW
+  email_492: actual=OK, predicted=null
+  email_493: actual=OK, predicted=null
+  email_494: actual=OK, predicted=null
+  email_495: actual=OK, predicted=null
+  email_496: actual=OK, predicted=null
+  email_497: actual=OK, predicted=null
+  email_499: actual=MISMATCH, predicted=NEEDS_REVIEW
+  email_500: actual=OK, predicted=null
+  email_501: actual=NEEDS_REVIEW, predicted=null
+  email_502: actual=NEEDS_REVIEW, predicted=null
+  email_503: actual=NEEDS_REVIEW, predicted=null
+  email_504: actual=NEEDS_REVIEW, predicted=null
+  email_505: actual=NEEDS_REVIEW, predicted=null
+  email_511: actual=NEEDS_REVIEW, predicted=null
+  email_512: actual=NEEDS_REVIEW, predicted=null
+  email_513: actual=NEEDS_REVIEW, predicted=null
+  email_514: actual=NEEDS_REVIEW, predicted=null
+  email_515: actual=NEEDS_REVIEW, predicted=null
+
+REVIEW_REASON MISTAKES (93 total):
+  email_009: actual=null, predicted=missing_value
+  email_016: actual=null, predicted=missing_attachment
+  email_025: actual=null, predicted=missing_value
+  email_031: actual=null, predicted=missing_value
+  email_032: actual=null, predicted=missing_value
+  email_040: actual=null, predicted=missing_value
+  email_046: actual=null, predicted=missing_value
+  email_050: actual=null, predicted=missing_attachment
+  email_059: actual=null, predicted=missing_value
+  email_064: actual=null, predicted=missing_value
+  email_068: actual=null, predicted=missing_value
+  email_077: actual=null, predicted=missing_attachment
+  email_080: actual=null, predicted=missing_attachment
+  email_081: actual=null, predicted=missing_attachment
+  email_082: actual=null, predicted=missing_value
+  email_095: actual=null, predicted=missing_attachment
+  email_096: actual=null, predicted=missing_value
+  email_105: actual=null, predicted=missing_attachment
+  email_107: actual=null, predicted=missing_value
+  email_118: actual=null, predicted=missing_value
+  email_121: actual=null, predicted=missing_value
+  email_132: actual=null, predicted=missing_value
+  email_133: actual=null, predicted=missing_value
+  email_143: actual=null, predicted=missing_value
+  email_144: actual=null, predicted=missing_value
+  email_145: actual=null, predicted=missing_value
+  email_146: actual=null, predicted=missing_value
+  email_160: actual=null, predicted=missing_value
+  email_174: actual=null, predicted=missing_value
+  email_182: actual=null, predicted=missing_value
+  email_187: actual=null, predicted=missing_attachment
+  email_197: actual=null, predicted=missing_value
+  email_198: actual=null, predicted=missing_value
+  email_208: actual=null, predicted=missing_value
+  email_223: actual=null, predicted=missing_attachment
+  email_227: actual=null, predicted=missing_value
+  email_235: actual=null, predicted=missing_value
+  email_243: actual=null, predicted=missing_value
+  email_249: actual=null, predicted=missing_value
+  email_256: actual=null, predicted=missing_value
+  email_259: actual=null, predicted=missing_attachment
+  email_265: actual=null, predicted=missing_attachment
+  email_270: actual=null, predicted=missing_value
+  email_273: actual=null, predicted=missing_value
+  email_275: actual=null, predicted=missing_value
+  email_291: actual=null, predicted=missing_value
+  email_292: actual=null, predicted=missing_attachment
+  email_299: actual=null, predicted=missing_attachment
+  email_300: actual=null, predicted=missing_value
+  email_302: actual=null, predicted=missing_value
+  email_307: actual=null, predicted=missing_value
+  email_309: actual=null, predicted=missing_attachment
+  email_313: actual=null, predicted=missing_value
+  email_318: actual=null, predicted=missing_attachment
+  email_326: actual=null, predicted=missing_attachment
+  email_334: actual=null, predicted=missing_value
+  email_342: actual=null, predicted=missing_value
+  email_343: actual=null, predicted=missing_attachment
+  email_348: actual=null, predicted=missing_value
+  email_349: actual=null, predicted=missing_value
+  email_350: actual=null, predicted=missing_attachment
+  email_351: actual=null, predicted=missing_value
+  email_378: actual=null, predicted=missing_value
+  email_381: actual=null, predicted=missing_attachment
+  email_383: actual=null, predicted=missing_value
+  email_391: actual=null, predicted=missing_value
+  email_401: actual=null, predicted=missing_attachment
+  email_407: actual=null, predicted=missing_value
+  email_409: actual=null, predicted=missing_value
+  email_424: actual=null, predicted=missing_attachment
+  email_428: actual=null, predicted=missing_value
+  email_432: actual=null, predicted=missing_attachment
+  email_434: actual=null, predicted=missing_value
+  email_435: actual=null, predicted=missing_value
+  email_447: actual=null, predicted=missing_attachment
+  email_448: actual=null, predicted=missing_attachment
+  email_459: actual=null, predicted=missing_attachment
+  email_462: actual=null, predicted=missing_value
+  email_468: actual=null, predicted=missing_value
+  email_479: actual=null, predicted=missing_value
+  email_480: actual=null, predicted=missing_attachment
+  email_491: actual=null, predicted=missing_value
+  email_499: actual=null, predicted=missing_value
+  email_501: actual=wrong_doc_type, predicted=null
+  email_502: actual=wrong_doc_type, predicted=null
+  email_503: actual=wrong_doc_type, predicted=null
+  email_504: actual=wrong_doc_type, predicted=null
+  email_505: actual=wrong_doc_type, predicted=null
+  email_511: actual=unreadable, predicted=null
+  email_512: actual=unreadable, predicted=null
+  email_513: actual=unreadable, predicted=null
+  email_514: actual=unreadable, predicted=null
+  email_515: actual=unreadable, predicted=null
+
+DEFECT_FIELDS MISTAKES (38 total):
+  email_004: actual=['consignee', 'notify_party'], predicted=[] (missing=['consignee', 'notify_party'], extra=[])
+  email_013: actual=['port_of_discharge'], predicted=[] (missing=['port_of_discharge'], extra=[])
+  email_025: actual=['container_count', 'port_of_discharge'], predicted=[] (missing=['container_count', 'port_of_discharge'], extra=[])
+  email_031: actual=['container_count', 'gross_weight_kg'], predicted=[] (missing=['container_count', 'gross_weight_kg'], extra=[])
+  email_043: actual=['container_count'], predicted=[] (missing=['container_count'], extra=[])
+  email_046: actual=['notify_party'], predicted=[] (missing=['notify_party'], extra=[])
+  email_097: actual=['container_count', 'gross_weight_kg'], predicted=[] (missing=['container_count', 'gross_weight_kg'], extra=[])
+  email_107: actual=['consignee', 'container_count'], predicted=[] (missing=['consignee', 'container_count'], extra=[])
+  email_121: actual=['gross_weight_kg'], predicted=[] (missing=['gross_weight_kg'], extra=[])
+  email_128: actual=['gross_weight_kg', 'port_of_loading'], predicted=['port_of_loading'] (missing=['gross_weight_kg'], extra=[])
+  email_129: actual=['port_of_discharge', 'port_of_loading'], predicted=[] (missing=['port_of_discharge', 'port_of_loading'], extra=[])
+  email_133: actual=['gross_weight_kg'], predicted=[] (missing=['gross_weight_kg'], extra=[])
+  email_144: actual=['consignee', 'container_count'], predicted=[] (missing=['consignee', 'container_count'], extra=[])
+  email_145: actual=['shipper'], predicted=[] (missing=['shipper'], extra=[])
+  email_174: actual=['notify_party', 'port_of_discharge'], predicted=[] (missing=['notify_party', 'port_of_discharge'], extra=[])
+  email_178: actual=['container_count'], predicted=[] (missing=['container_count'], extra=[])
+  email_182: actual=['container_count', 'port_of_discharge'], predicted=[] (missing=['container_count', 'port_of_discharge'], extra=[])
+  email_225: actual=['consignee'], predicted=[] (missing=['consignee'], extra=[])
+  email_243: actual=['port_of_discharge', 'port_of_loading'], predicted=[] (missing=['port_of_discharge', 'port_of_loading'], extra=[])
+  email_256: actual=['port_of_discharge', 'shipper'], predicted=[] (missing=['port_of_discharge', 'shipper'], extra=[])
+  email_270: actual=['port_of_discharge'], predicted=[] (missing=['port_of_discharge'], extra=[])
+  email_291: actual=['consignee', 'container_count'], predicted=[] (missing=['consignee', 'container_count'], extra=[])
+  email_300: actual=['notify_party', 'shipper'], predicted=[] (missing=['notify_party', 'shipper'], extra=[])
+  email_302: actual=['container_count'], predicted=[] (missing=['container_count'], extra=[])
+  email_312: actual=['notify_party', 'shipper'], predicted=[] (missing=['notify_party', 'shipper'], extra=[])
+  email_313: actual=['container_count', 'gross_weight_kg'], predicted=[] (missing=['container_count', 'gross_weight_kg'], extra=[])
+  email_324: actual=['container_count', 'shipper'], predicted=[] (missing=['container_count', 'shipper'], extra=[])
+  email_334: actual=['consignee', 'shipper'], predicted=[] (missing=['consignee', 'shipper'], extra=[])
+  email_342: actual=['container_count', 'notify_party'], predicted=[] (missing=['container_count', 'notify_party'], extra=[])
+  email_351: actual=['container_count', 'gross_weight_kg'], predicted=[] (missing=['container_count', 'gross_weight_kg'], extra=[])
+  email_354: actual=['gross_weight_kg', 'notify_party'], predicted=[] (missing=['gross_weight_kg', 'notify_party'], extra=[])
+  email_361: actual=['gross_weight_kg', 'port_of_discharge'], predicted=['port_of_discharge'] (missing=['gross_weight_kg'], extra=[])
+  email_410: actual=['port_of_loading'], predicted=[] (missing=['port_of_loading'], extra=[])
+  email_434: actual=['port_of_discharge'], predicted=[] (missing=['port_of_discharge'], extra=[])
+  email_435: actual=['gross_weight_kg'], predicted=[] (missing=['gross_weight_kg'], extra=[])
+  email_468: actual=['container_count', 'port_of_loading'], predicted=[] (missing=['container_count', 'port_of_loading'], extra=[])
+  email_481: actual=['consignee'], predicted=[] (missing=['consignee'], extra=[])
+  email_499: actual=['gross_weight_kg'], predicted=[] (missing=['gross_weight_kg'], extra=[])
+
+HAS_DEFECT MISTAKES (36 total):
+  email_004: actual=True, predicted=False
+  email_013: actual=True, predicted=False
+  email_025: actual=True, predicted=False
+  email_031: actual=True, predicted=False
+  email_043: actual=True, predicted=False
+  email_046: actual=True, predicted=False
+  email_097: actual=True, predicted=False
+  email_107: actual=True, predicted=False
+  email_121: actual=True, predicted=False
+  email_129: actual=True, predicted=False
+  email_133: actual=True, predicted=False
+  email_144: actual=True, predicted=False
+  email_145: actual=True, predicted=False
+  email_174: actual=True, predicted=False
+  email_178: actual=True, predicted=False
+  email_182: actual=True, predicted=False
+  email_225: actual=True, predicted=False
+  email_243: actual=True, predicted=False
+  email_256: actual=True, predicted=False
+  email_270: actual=True, predicted=False
+  email_291: actual=True, predicted=False
+  email_300: actual=True, predicted=False
+  email_302: actual=True, predicted=False
+  email_312: actual=True, predicted=False
+  email_313: actual=True, predicted=False
+  email_324: actual=True, predicted=False
+  email_334: actual=True, predicted=False
+  email_342: actual=True, predicted=False
+  email_351: actual=True, predicted=False
+  email_354: actual=True, predicted=False
+  email_410: actual=True, predicted=False
+  email_434: actual=True, predicted=False
+  email_435: actual=True, predicted=False
+  email_468: actual=True, predicted=False
+  email_481: actual=True, predicted=False
+  email_499: actual=True, predicted=False
+
+======================================================================
+AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying.
+======================================================================
+
+Hardcoded harness changes to consider (evaluator.py logic, no prompt involved):
+  [evaluator.py] Increase the weight tolerance for the grounding verifier to 0.5
+    why: The grounding verifier is consistently failing to match values in the SI/BL attachments, suggesting that the current weight tolerance is too strict. Increasing the tolerance to 0.5 should allow for more flexible matching.
+  [evaluator.py] Modify the grounding verifier to use a more lenient literal match threshold of 0.7
+    why: The grounding verifier is failing to match literal values in the SI/BL attachments, suggesting that the current threshold is too strict. Modifying the threshold to 0.7 should allow for more flexible matching.
+  [evaluator.py] Add a fuzzy-match threshold of 0.8 for the grounding verifier
+    why: The grounding verifier is failing to match values in the SI/BL attachments, suggesting that the current fuzzy-match threshold is too strict. Adding a fuzzy-match threshold of 0.8 should allow for more flexible matching.
+
+Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py):
+  (none suggested)
