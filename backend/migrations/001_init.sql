@@ -39,9 +39,13 @@ create index if not exists emails_run_id_idx on emails(run_id);
 
 -- email_id here has no foreign key: emails' key is now (email_id, run_id),
 -- and a plain email_id is no longer guaranteed unique on its own.
+-- (email_id, run_id) is unique: only one audit action can be logged per
+-- email per run — a second resolve/awaiting/retry on the same email+run
+-- needs a fresh run to get its own audit row, not a second insert here.
 create table if not exists review_audit_log (
     id                bigserial primary key,
     email_id          text not null,
+    run_id            text references runs(run_id),
     escalated_at      timestamptz,
     review_reason     text,
     automated_result  text,
@@ -50,7 +54,8 @@ create table if not exists review_audit_log (
     resolved_by       text,
     human_decision    text,
     defect_fields     jsonb,
-    notes             text
+    notes             text,
+    unique (email_id, run_id)
 );
 
 create index if not exists review_audit_log_email_id_idx on review_audit_log(email_id);

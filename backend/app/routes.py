@@ -253,6 +253,7 @@ def resolve_email(email_id):
     db.update_email_resolution(email_id, **update_fields)
     db.insert_audit_log_row({
         "email_id": email_id,
+        "run_id": row.get("run_id"),
         "escalated_at": row.get("processed_at"),
         "review_reason": row.get("automated_review_reason"),
         "automated_result": row.get("automated_status"),
