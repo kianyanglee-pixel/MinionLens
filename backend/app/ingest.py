@@ -3,7 +3,8 @@ import re
 import urllib.parse
 from pathlib import Path
 import requests
-
+import io
+import zipfile
 BASE_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "batches"
 
 def get_batch_dirs(run_id: str):
@@ -201,5 +202,27 @@ def save_uploaded_files_for_batch(run_id: str, inbox_files: list, attachment_fil
     print(f"[*] Saved {att_count} attachments into {attachments_dir}")
     return inbox_count, att_count
 
-if __name__ == "__main__":
-    print(BASE_DATA_DIR)
+import zipfile
+
+def extract_zip_for_batch(run_id: str, zip_file_storage):
+    """Extracts the uploaded ZIP bundle into backend/data/batches/<run_id>/."""
+    batch_root, inbox_dir, attachments_dir = get_batch_dirs(run_id)
+
+    with zipfile.ZipFile(zip_file_storage.stream) as archive:
+        for member in archive.infolist():
+            if member.is_dir():
+                continue
+
+            filename = Path(member.filename).name
+            if member.filename.startswith("inbox/") and filename.endswith(".json"):
+                dest = inbox_dir / filename
+                with archive.open(member) as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+            elif member.filename.startswith("attachments/"):
+                dest = attachments_dir / filename
+                with archive.open(member) as src, open(dest, "wb") as dst:
+                    dst.write(src.read())
+
+    inbox_count = len(list(inbox_dir.glob("*.json")))
+    att_count = len(list(attachments_dir.glob("*")))
+    return inbox_count, att_count

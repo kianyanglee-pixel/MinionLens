@@ -18,7 +18,8 @@ from app.ingest import (
     save_uploaded_files_for_batch,
     sync_from_s3,
     sync_from_gcs,
-    sync_from_gdrive_folder
+    sync_from_gdrive_folder,
+    extract_zip_for_batch
 )
 from app.db import (
     get_supabase,
@@ -30,7 +31,7 @@ from app.db import (
     resolve_review_item
 )
 
-bp = Blueprint("api", __name__, url_prefix="/api")
+bp = Blueprint("api", __name__)
 
 DOC_COMPARISON_CATEGORY = "BL_COMPARISON"
 
@@ -193,10 +194,27 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
 def ingest_batch():
     started_at = (
         request.form.get("started_at") 
-        or (request.get_json() or {}).get("started_at") 
+        or (request.get_json(silent=True) or {}).get("started_at") 
         or datetime.now(timezone.utc).isoformat()
     )
 
+    # 1. Fast In-Memory ZIP Archive Handler
+    if "batch_archive" in request.files:
+        zip_file = request.files["batch_archive"]
+        email_count = int(request.form.get("email_count", 0))
+
+        run_id = init_run_record(started_at=started_at, email_count=email_count)
+        in_count, att_count = extract_zip_for_batch(run_id, zip_file)
+
+        return jsonify({
+            "status": "success",
+            "run_id": run_id,
+            "inbox_count": in_count,
+            "attachment_count": att_count,
+            "started_at": started_at
+        })
+
+    # 2. Standard Individual File Uploads
     if "inbox_files" in request.files or "attachment_files" in request.files:
         inbox_files = request.files.getlist("inbox_files")
         attachment_files = request.files.getlist("attachment_files")
@@ -212,39 +230,47 @@ def ingest_batch():
             "started_at": started_at
         })
 
-    data = request.get_json() or {}
-    source_type = data.get("source_type")
-    inbox_uri = data.get("inbox_uri", "")
-    attachments_uri = data.get("attachments_uri", "")
+    # 3. Cloud (S3/GCS) & Google Drive Ingestion
+    data = request.get_json(silent=True) or {}
+    source_type = data.get("source_type") or request.form.get("source_type")
+    inbox_uri = data.get("inbox_uri", "") or request.form.get("inbox_uri", "")
+    attachments_uri = data.get("attachments_uri", "") or request.form.get("attachments_uri", "")
 
-    run_id = init_run_record(started_at=started_at, email_count=0)
-    batch_root, inbox_dir, attachments_dir = get_batch_dirs(run_id)
+    if source_type in ("cloud", "drive"):
+        run_id = init_run_record(started_at=started_at, email_count=0)
+        batch_root, inbox_dir, attachments_dir = get_batch_dirs(run_id)
 
-    try:
-        if source_type == "cloud":
-            if inbox_uri.startswith("s3://"):
-                in_count = sync_from_s3(inbox_uri, inbox_dir)
-                att_count = sync_from_s3(attachments_uri, attachments_dir)
-            elif inbox_uri.startswith("gs://"):
-                in_count = sync_from_gcs(inbox_uri, inbox_dir)
-                att_count = sync_from_gcs(attachments_uri, attachments_dir)
-        elif source_type == "drive":
-            in_count = sync_from_gdrive_folder(inbox_uri, inbox_dir)
-            att_count = sync_from_gdrive_folder(attachments_uri, attachments_dir)
-        else:
-            return jsonify({"status": "error", "message": "Unknown source_type"}), 400
+        try:
+            if source_type == "cloud":
+                if inbox_uri.startswith("s3://"):
+                    in_count = sync_from_s3(inbox_uri, inbox_dir)
+                    att_count = sync_from_s3(attachments_uri, attachments_dir)
+                elif inbox_uri.startswith("gs://"):
+                    in_count = sync_from_gcs(inbox_uri, inbox_dir)
+                    att_count = sync_from_gcs(attachments_uri, attachments_dir)
+                else:
+                    return jsonify({"status": "error", "message": "URI must begin with s3:// or gs://"}), 400
+            elif source_type == "drive":
+                in_count = sync_from_gdrive_folder(inbox_uri, inbox_dir)
+                att_count = sync_from_gdrive_folder(attachments_uri, attachments_dir)
 
-        get_supabase().table("runs").update({"email_count": in_count}).eq("run_id", run_id).execute()
+            get_supabase().table("runs").update({"email_count": in_count}).eq("run_id", run_id).execute()
 
-        return jsonify({
-            "status": "success",
-            "run_id": run_id,
-            "inbox_count": in_count,
-            "attachment_count": att_count,
-            "started_at": started_at
-        })
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+            return jsonify({
+                "status": "success",
+                "run_id": run_id,
+                "inbox_count": in_count,
+                "attachment_count": att_count,
+                "started_at": started_at
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    # 4. Mandatory Fallback (Prevents TypeError returning None)
+    return jsonify({
+        "status": "error",
+        "message": "No valid upload payload provided (expected 'batch_archive', 'inbox_files', or cloud parameters)."
+    }), 400
 
 # ==========================================
 # Attachment Inspection Route

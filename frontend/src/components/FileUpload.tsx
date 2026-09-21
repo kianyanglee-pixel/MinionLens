@@ -3,6 +3,7 @@ import {
   FolderArchive, FileCode, FileSpreadsheet, HardDrive, 
   Cloud, CheckCircle2, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
+import JSZip from 'jszip';
 
 interface FileUploadProps {
   onStartStream: (runId: string, totalCount: number) => void;
@@ -11,16 +12,17 @@ interface FileUploadProps {
 export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   const [sourceType, setSourceType] = useState<'local' | 'cloud' | 'drive'>('local');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatusMsg, setUploadStatusMsg] = useState('');
 
   // Local Dual-Folder State
   const [inboxFiles, setInboxFiles] = useState<File[]>([]);
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
 
-  // Cloud Storage URIs
+  // Cloud Storage URIs (S3 or GCS)
   const [cloudInboxUri, setCloudInboxUri] = useState('s3://shipping-ops-bucket/inbox/');
   const [cloudAttachmentsUri, setCloudAttachmentsUri] = useState('s3://shipping-ops-bucket/attachments/');
 
-  // Drive Folder URLs
+  // Google Drive Shared/Public Folder Links or IDs
   const [driveInboxUrl, setDriveInboxUrl] = useState('');
   const [driveAttachmentsUrl, setDriveAttachmentsUrl] = useState('');
 
@@ -57,14 +59,34 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
       let res: Response;
 
       if (sourceType === 'local') {
+        setUploadStatusMsg('Compressing batch files in memory...');
+        const zip = new JSZip();
+        const inboxFolder = zip.folder('inbox');
+        const attFolder = zip.folder('attachments');
+
+        inboxFiles.forEach(f => {
+          inboxFolder?.file(f.name, f);
+        });
+
+        attachmentFiles.forEach(f => {
+          attFolder?.file(f.name, f);
+        });
+
+        const zipBlob = await zip.generateAsync({ 
+          type: 'blob', 
+          compression: 'DEFLATE', 
+          compressionOptions: { level: 4 } 
+        });
+
+        setUploadStatusMsg('Uploading bundled archive...');
         const formData = new FormData();
-        inboxFiles.forEach(f => formData.append('inbox_files', f));
-        attachmentFiles.forEach(f => formData.append('attachment_files', f));
+        formData.append('batch_archive', zipBlob, 'batch.zip');
         formData.append('started_at', startedAt);
         formData.append('email_count', String(inboxFiles.length));
 
         res = await fetch('/api/ingest', { method: 'POST', body: formData });
       } else {
+        setUploadStatusMsg(`Syncing from remote ${sourceType}...`);
         res = await fetch('/api/ingest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -81,7 +103,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
 
       if (res.ok && data.status === 'success' && data.run_id) {
         const count = data.inbox_count || data.inbox_downloaded || inboxFiles.length;
-        // Delegate tracking up to Dashboard so it survives closing modal
         onStartStream(data.run_id, count);
       } else {
         alert(`Ingestion failed: ${data.message || 'Unknown error'}`);
@@ -96,6 +117,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
 
   return (
     <div className="bg-white rounded-2xl w-full">
+      {/* Header & Source Switcher */}
       <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
         <div>
           <h3 className="font-extrabold text-slate-900 text-base font-sans">Batch Document Ingestion</h3>
@@ -126,6 +148,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         </div>
       </div>
 
+      {/* 1. LOCAL DIRECTORY MODE */}
       {sourceType === 'local' && (
         <div className="grid grid-cols-2 gap-4">
           <div 
@@ -196,66 +219,85 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         </div>
       )}
 
+      {/* 2. CLOUD BUCKET INGESTION (S3 / GCS) */}
       {sourceType === 'cloud' && (
-        <div className="space-y-3.5 py-1">
+        <div className="space-y-4 py-2">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 font-mono">
-              Inbox S3/GCS URI (JSON records)
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Inbox Bucket URI (S3 or GCS)
             </label>
             <input
               type="text"
               value={cloudInboxUri}
               onChange={(e) => setCloudInboxUri(e.target.value)}
-              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 font-mono text-slate-800 bg-slate-50"
+              placeholder="s3://my-bucket/inbox/ or gs://my-bucket/inbox/"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
             />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Target folder where email JSON objects are stored.
+            </p>
           </div>
+
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 font-mono">
-              Attachments S3/GCS URI (Documents)
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Attachments Bucket URI (S3 or GCS)
             </label>
             <input
               type="text"
               value={cloudAttachmentsUri}
               onChange={(e) => setCloudAttachmentsUri(e.target.value)}
-              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 font-mono text-slate-800 bg-slate-50"
+              placeholder="s3://my-bucket/attachments/ or gs://my-bucket/attachments/"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
             />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Target folder where SI/BL documents (TXT, PDF, XLSX) reside.
+            </p>
           </div>
         </div>
       )}
 
+      {/* 3. GOOGLE DRIVE INGESTION */}
       {sourceType === 'drive' && (
-        <div className="space-y-3.5 py-1">
+        <div className="space-y-4 py-2">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 font-mono">
-              Google Drive Folder: inbox/ (JSON)
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Google Drive "inbox" Folder URL or ID
             </label>
             <input
               type="text"
-              placeholder="https://drive.google.com/drive/folders/..."
               value={driveInboxUrl}
               onChange={(e) => setDriveInboxUrl(e.target.value)}
-              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 font-mono text-slate-800 bg-slate-50"
+              placeholder="https://drive.google.com/drive/folders/1aBcD... or folder ID"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
             />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Link to public or service-account shared folder containing email JSONs.
+            </p>
           </div>
+
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 font-mono">
-              Google Drive Folder: attachments/ (Docs)
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Google Drive "attachments" Folder URL or ID
             </label>
             <input
               type="text"
-              placeholder="https://drive.google.com/drive/folders/..."
               value={driveAttachmentsUrl}
               onChange={(e) => setDriveAttachmentsUrl(e.target.value)}
-              className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 font-mono text-slate-800 bg-slate-50"
+              placeholder="https://drive.google.com/drive/folders/2xYzW... or folder ID"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
             />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Link to public or service-account shared folder containing SI/BL attachments.
+            </p>
           </div>
         </div>
       )}
 
+      {/* Footer Controls */}
       <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
           <AlertCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-          <span>Files will be verified against SI and BL attachments</span>
+          <span>{uploadStatusMsg || (sourceType === 'local' ? 'Files will be compressed and verified in batch' : `Syncing via ${sourceType}`)}</span>
         </div>
 
         <button
@@ -267,7 +309,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
           {isUploading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Ingesting Files...</span>
+              <span>{uploadStatusMsg || 'Processing...'}</span>
             </>
           ) : (
             <>
