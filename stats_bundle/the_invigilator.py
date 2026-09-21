@@ -2,8 +2,9 @@
 
 Downloads submission.json from Supabase Storage (submissions/submission.json,
 the file routes.py's create_run() uploads via Inbox.submit()) and diffs it,
-entry by entry, against this folder's ground_truth.json. Writes a folder of
-CSV files to report_card/performance_{X}/, X auto-incrementing per run.
+entry by entry, against this folder's ground_truth.json. Writes one combined
+Excel report card to report_card/performance_{X}.xlsx, X auto-incrementing
+per run.
 
 "LLM over LLM": every metric, confusion matrix, and mistake list is computed
 with plain deterministic code — no AI involved, same inputs always give the
@@ -12,7 +13,6 @@ section, which calls our own llm.py's ask_json() to have the active LLM
 provider critique the pipeline's own mistakes and suggest fixes. Nowhere
 else in this file calls an LLM.
 """
-import csv
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -23,6 +23,9 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")  # headless — this script never needs an on-screen window
 import matplotlib.pyplot as plt  # noqa: E402
+from openpyxl import Workbook  # noqa: E402
+from openpyxl.styles import Alignment, Font, PatternFill  # noqa: E402
+from openpyxl.utils import get_column_letter  # noqa: E402
 
 STATS_BUNDLE_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = STATS_BUNDLE_DIR.parent / "backend"
@@ -94,13 +97,12 @@ def _load_submission(inbox: Inbox) -> dict:
 
 
 def _next_index() -> int:
-    """Shared counter for performance_{X}/ (a folder of CSVs) and
-    graphs_{X}.jpg, so a run's report and its dashboard always carry the
-    same X."""
+    """Shared counter for performance_{X}.xlsx and graphs_{X}.jpg, so a run's
+    report and its dashboard always carry the same X."""
     REPORT_CARD_DIR.mkdir(parents=True, exist_ok=True)
     SUMMARY_GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
     x = 1
-    while (REPORT_CARD_DIR / f"performance_{x}").exists() or (SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg").exists():
+    while (REPORT_CARD_DIR / f"performance_{x}.xlsx").exists() or (SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg").exists():
         x += 1
     return x
 
@@ -347,130 +349,23 @@ def evaluate(ground_truth: dict, submission: dict) -> dict:
     }
 
 
-# -- plain-text rendering ------------------------------------------------------
-
-RULE = "=" * 70
-SUBRULE = "-" * 70
-
+# -- shared formatting helpers -------------------------------------------------
 
 def _pct(fraction: float) -> str:
     return f"{fraction * 100:.1f}%"
 
 
-def _render_subset_line(subset: dict, noun: str) -> str:
+def _subset_row(subset: dict, noun: str) -> tuple:
+    """One report row for a true-positive-subset stat, cells kept separate
+    (label, correct, total, accuracy%, explanation) instead of packed into
+    one sentence."""
     total, correct = subset["total"], subset["correct"]
     if total == 0:
-        return f"(No emails in the answer key actually needed {noun} — nothing to check here.)"
-    return f"Of the {total} emails that truly {noun}, {correct} got it exactly right ({_pct(correct / total)})."
-
-
-def _render_multinomial_section(title: str, description: str, section: dict) -> list:
-    lines = [SUBRULE, title, description, SUBRULE, ""]
-    lines.append(f"Accuracy: {_pct(section['accuracy'])} ({section['correct']}/{section['total']} correct)")
-    lines.append(f"  -> {section['accuracy_comment']}")
-    lines.append(f"Macro-F1: {section['macro_f1']}")
-    lines.append(f"  -> {section['macro_f1_comment']}")
-    lines.append("")
-    lines.append(f"Per-label breakdown ({section['per_class_comment']}):")
-    for label, stats in sorted(section["per_class"].items()):
-        lines.append(
-            f"  {label:<20} precision {stats['precision']:.2f}   recall {stats['recall']:.2f}   "
-            f"f1 {stats['f1']:.2f}   ({stats['support']} in answer key)"
-        )
-    lines.append("")
-    lines.append(f"Confusion matrix ({section['confusion_matrix_comment']}):")
-    for true_label, predicted_counts in sorted(section["confusion_matrix"].items()):
-        breakdown = ", ".join(f"{p}={c}" for p, c in sorted(predicted_counts.items()) if c)
-        lines.append(f"  actual {true_label:<20} -> predicted: {breakdown or '(nothing)'}")
-    lines.append("")
-    return lines
-
-
-def _render_defect_fields_section(section: dict) -> list:
-    lines = [
-        SUBRULE,
-        "DEFECT_FIELDS — which specific fields it flagged as broken",
-        SUBRULE,
-        "",
-        f"Exact-match accuracy: {_pct(section['exact_match_accuracy'])}",
-        f"  -> {section['exact_match_accuracy_comment']}",
-        f"Mean Jaccard overlap: {section['mean_jaccard_similarity']}",
-        f"  -> {section['mean_jaccard_similarity_comment']}",
-        "",
-        f"Per-field breakdown ({section['per_field_comment']}):",
-    ]
-    for field, stats in sorted(section["per_field"].items()):
-        lines.append(f"  {field:<20} precision {stats['precision']:.2f}   recall {stats['recall']:.2f}")
-    lines.append("")
-    return lines
-
-
-def _render_has_defect_section(section: dict) -> list:
-    cm = section["confusion_matrix"]
-    lines = [
-        SUBRULE,
-        "HAS_DEFECT — yes/no, did it think this shipment had a problem",
-        SUBRULE,
-        "",
-        f"Accuracy: {_pct(section['accuracy'])}",
-        f"  -> {section['accuracy_comment']}",
-        f"Precision: {section['precision']}",
-        f"  -> {section['precision_comment']}",
-        f"Recall: {section['recall']}",
-        f"  -> {section['recall_comment']}",
-        f"F1: {section['f1']}",
-        f"  -> {section['f1_comment']}",
-        f"Cohen's Kappa: {section['cohens_kappa']}",
-        f"  -> {section['cohens_kappa_comment']}",
-        "",
-        f"Confusion matrix ({section['confusion_matrix_comment']}):",
-        f"  caught defects (true positive):  {cm['tp']}",
-        f"  false alarms (false positive):   {cm['fp']}",
-        f"  correctly cleared (true negative): {cm['tn']}",
-        f"  missed defects (false negative): {cm['fn']}",
-        "",
-    ]
-    return lines
-
-
-def _render_mistakes_section(report: dict) -> list:
-    lines = [RULE, "MISTAKES", RULE, ""]
-
-    def _multinomial_mistakes(title, section):
-        lines.append(f"{title} ({len(section['errors'])} total):")
-        if section["errors"]:
-            for err in section["errors"]:
-                lines.append(f"  {err['email_id']}: actual={err['true']}, predicted={err['predicted']}")
-        else:
-            lines.append("  no mistakes — every email in this field matched the answer key.")
-        lines.append("")
-
-    _multinomial_mistakes("CATEGORY MISTAKES", report["category"])
-    _multinomial_mistakes("STATUS MISTAKES", report["status"])
-    _multinomial_mistakes("REVIEW_REASON MISTAKES", report["review_reason"])
-
-    defect_fields_errors = report["defect_fields"]["errors"]
-    lines.append(f"DEFECT_FIELDS MISTAKES ({len(defect_fields_errors)} total):")
-    if defect_fields_errors:
-        for err in defect_fields_errors:
-            lines.append(
-                f"  {err['email_id']}: actual={err['true']}, predicted={err['predicted']}"
-                f" (missing={err['missing']}, extra={err['extra']})"
-            )
-    else:
-        lines.append("  no mistakes — every email's flagged-field set matched the answer key exactly.")
-    lines.append("")
-
-    has_defect_errors = report["has_defect"]["errors"]
-    lines.append(f"HAS_DEFECT MISTAKES ({len(has_defect_errors)} total):")
-    if has_defect_errors:
-        for err in has_defect_errors:
-            lines.append(f"  {err['email_id']}: actual={err['true']}, predicted={err['predicted']}")
-    else:
-        lines.append("  no mistakes — has_defect matched the answer key for every email.")
-    lines.append("")
-
-    return lines
+        return ("data", [f"Subset — emails that {noun}", 0, 0, "n/a", f"No emails in the answer key actually {noun} — nothing to check here."])
+    return ("data", [
+        f"Subset — emails that {noun}", correct, total, _pct(correct / total),
+        f"Correct out of just the emails that actually {noun} (not padded by emails where nothing needed flagging).",
+    ])
 
 
 # -- AI recommendations (the one deliberate exception to "no LLM calls") -----
@@ -635,141 +530,6 @@ def get_ai_recommendations(report: dict, inbox: Inbox) -> dict:
     }
 
 
-def _render_recommendation_items(lines: list, title: str, items: list) -> None:
-    lines.append(f"{title}:")
-    if items:
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            file = item.get("file", "?")
-            change = item.get("change", "")
-            why = item.get("why")
-            lines.append(f"  [{file}] {change}")
-            if why:
-                lines.append(f"    why: {why}")
-    else:
-        lines.append("  (none suggested)")
-    lines.append("")
-
-
-def _render_general_advice_items(lines: list, items: list) -> None:
-    lines.append("General advice (model choice, data quality, or anything else outside harness/prompt tweaks):")
-    if items:
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            observation = item.get("observation", "")
-            why = item.get("why")
-            lines.append(f"  - {observation}")
-            if why:
-                lines.append(f"    why: {why}")
-    else:
-        lines.append("  (none suggested)")
-    lines.append("")
-
-
-def _render_recommendations_section(recommendations: dict) -> list:
-    lines = [
-        RULE,
-        "AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying.",
-        RULE,
-        "",
-    ]
-    if recommendations.get("error"):
-        lines.append(f"Could not generate recommendations: {recommendations['error']}")
-        lines.append("")
-        return lines
-
-    _render_recommendation_items(
-        lines, "Hardcoded harness changes to consider (evaluator.py logic, no prompt involved)",
-        recommendations["harness_changes"],
-    )
-    _render_recommendation_items(
-        lines, "Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py)",
-        recommendations["prompt_changes"],
-    )
-    _render_general_advice_items(lines, recommendations["general_advice"])
-
-    if not recommendations["harness_changes"] and not recommendations["prompt_changes"] and not recommendations["general_advice"]:
-        lines.append(SUBRULE)
-        lines.append("All three lists above came back empty — raw LLM response, for debugging:")
-        lines.append(SUBRULE)
-        lines.append(json.dumps(recommendations.get("raw_response"), indent=2))
-        lines.append("")
-
-    return lines
-
-
-def render_text(report: dict, recommendations: dict, title: str = "THE INVIGILATOR — Pipeline Report Card") -> str:
-    lines = [
-        RULE,
-        title,
-        f"Run by: {_git_username()}",
-        f"Evaluated at: {report['evaluated_at']}",
-        f"AI recommendations powered by: {_llm_info_line()}",
-        RULE,
-        "",
-        f"Emails in answer key:     {report['ground_truth_count']}",
-        f"Emails in submission:     {report['submission_count']}",
-        f"Emails actually graded:   {report['evaluated_count']} ({_pct(report['rollups']['coverage'])} coverage)",
-        f"  -> {report['rollups']['coverage_comment']}",
-    ]
-    if report["missing_in_submission"]:
-        lines.append(f"Missing from submission ({len(report['missing_in_submission'])}): {', '.join(report['missing_in_submission'])}")
-    else:
-        lines.append("Missing from submission: none")
-    if report["extra_in_submission"]:
-        lines.append(f"Extra in submission, not in answer key ({len(report['extra_in_submission'])}): {', '.join(report['extra_in_submission'])}")
-    else:
-        lines.append("Extra in submission, not in answer key: none")
-    lines.append("")
-
-    lines += _render_multinomial_section(
-        "CATEGORY — what type of email it thought this was",
-        "(BL_COMPARISON / SI_REQUEST / INVOICE_QUERY / GENERAL / SPAM)",
-        report["category"],
-    )
-    lines += _render_multinomial_section(
-        "STATUS — the overall verdict on the shipment documents",
-        "(OK / MISMATCH / NEEDS_REVIEW)",
-        report["status"],
-    )
-    lines += _render_multinomial_section(
-        "REVIEW_REASON — why it asked a human to take a look",
-        "(only set when status is NEEDS_REVIEW)",
-        report["review_reason"],
-    )
-    lines.append(_render_subset_line(report["review_reason"]["subset"], "needed review"))
-    lines.append("")
-    lines += _render_defect_fields_section(report["defect_fields"])
-    lines.append(_render_subset_line(report["defect_fields"]["subset"], "had a defect"))
-    lines.append("")
-    lines += _render_has_defect_section(report["has_defect"])
-    lines.append(_render_subset_line(report["has_defect"]["subset"], "had a defect"))
-    lines.append("")
-
-    rollups = report["rollups"]
-    lines += [
-        RULE,
-        "OVERALL SUMMARY",
-        RULE,
-        "",
-        f"Row-level exact match: {_pct(rollups['row_exact_match_rate'])} ({rollups['row_exact_match_count']}/{rollups['row_exact_match_total']})",
-        f"  -> {rollups['row_exact_match_rate_comment']}",
-        f"Processing-failure rate: {_pct(rollups['processing_failure_rate'])} ({rollups['processing_failure_count']} emails)",
-        f"  -> {rollups['processing_failure_rate_comment']}",
-        f"Coverage: {_pct(rollups['coverage'])}",
-        f"  -> {rollups['coverage_comment']}",
-        RULE,
-        "",
-    ]
-
-    lines += _render_mistakes_section(report)
-    lines += _render_recommendations_section(recommendations)
-
-    return "\n".join(lines)
-
-
 # -- visual dashboard (deterministic — same evaluate() results, no AI) -------
 
 def _plot_accuracy_bar(ax, report: dict) -> None:
@@ -872,133 +632,281 @@ def render_graphs(report: dict, output_path: Path) -> None:
     plt.close(fig)
 
 
-def _write_csv(path: Path, headers: list, rows: list) -> None:
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if headers:
-            writer.writerow(headers)
-        writer.writerows(rows)
+_XLSX_STYLES = {
+    "title": dict(font=Font(bold=True, size=14, color="FFFFFF"), fill=PatternFill("solid", fgColor="1F4E78")),
+    "section": dict(font=Font(bold=True, size=12, color="FFFFFF"), fill=PatternFill("solid", fgColor="4472C4")),
+    "subhead": dict(font=Font(bold=True, size=10, color="1F4E78"), fill=PatternFill("solid", fgColor="D9E1F2")),
+    "desc": dict(font=Font(italic=True, size=9, color="595959")),
+    "note": dict(font=Font(italic=True, size=9, color="808080")),
+    "data": dict(font=Font(size=10)),
+}
+_BANNER_STYLES = ("title", "section")
+_WRAP_THRESHOLD = 40  # cells with text longer than this wrap instead of truncating
+_BANNER_SPAN = 6  # columns a title/section banner is merged across
 
 
-def render_csv(report: dict, recommendations: dict, output_dir: Path,
-               title: str = "THE INVIGILATOR", extra_summary_rows: list = None) -> None:
-    """Same content as render_text(), as a folder of plain CSV files instead
-    of one .txt file — one CSV per metric (a single CSV can't hold multiple
-    tables/sheets the way a workbook can), plus a flattened Mistakes CSV
-    and an AI Recommendations CSV. Every value is plain, un-truncated text —
-    CSV cells have no width to resize in the first place."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _row(style: str, *cells) -> tuple:
+    return (style, list(cells))
 
-    summary_rows = []
-    if extra_summary_rows:
-        summary_rows.extend(extra_summary_rows)
-    summary_rows += [
-        ("Report", title),
-        ("Run by", _git_username()),
-        ("Evaluated at", report["evaluated_at"]),
-        ("AI recommendations powered by", _llm_info_line()),
-        ("Emails in answer key", report["ground_truth_count"]),
-        ("Emails in submission", report["submission_count"]),
-        ("Emails actually graded", f"{report['evaluated_count']} ({_pct(report['rollups']['coverage'])} coverage)"),
-        ("Missing from submission", ", ".join(report["missing_in_submission"]) or "none"),
-        ("Extra in submission, not in answer key", ", ".join(report["extra_in_submission"]) or "none"),
-        ("Row-level exact match", f"{_pct(report['rollups']['row_exact_match_rate'])} "
-                                   f"({report['rollups']['row_exact_match_count']}/{report['rollups']['row_exact_match_total']})"),
-        ("Processing-failure rate", f"{_pct(report['rollups']['processing_failure_rate'])} "
-                                     f"({report['rollups']['processing_failure_count']} emails)"),
-        ("Coverage", _pct(report["rollups"]["coverage"])),
+
+def _blank() -> tuple:
+    return ("blank", [])
+
+
+def _multinomial_rows(section_title: str, description: str, section: dict) -> list:
+    rows = [
+        _row("section", section_title),
+        _row("desc", description),
+        _blank(),
+        _row("subhead", "Metric", "Value", "Correct", "Total", "What it means"),
+        _row("data", "Accuracy", _pct(section["accuracy"]), section["correct"], section["total"], section["accuracy_comment"]),
+        _row("data", "Macro-F1", section["macro_f1"], "", "", section["macro_f1_comment"]),
+        _blank(),
+        _row("desc", f"Per-label breakdown — {section['per_class_comment']}"),
+        _row("subhead", "Label", "Precision", "Recall", "F1", "Support"),
     ]
-    _write_csv(output_dir / "summary.csv", ["Field", "Value"], summary_rows)
+    for label, stats in sorted(section["per_class"].items()):
+        rows.append(_row("data", label, stats["precision"], stats["recall"], stats["f1"], stats["support"]))
+    rows.append(_blank())
 
-    def multinomial_csv(filename: str, section: dict, subset_note: str = None):
-        rows = [
-            ("Accuracy", f"{_pct(section['accuracy'])} ({section['correct']}/{section['total']} correct)"),
-            ("Macro-F1", section["macro_f1"]),
-        ]
-        _write_csv(output_dir / f"{filename}_summary.csv", ["Metric", "Value"], rows)
+    labels = sorted(section["confusion_matrix"].keys())
+    rows.append(_row("desc", f"Confusion matrix — {section['confusion_matrix_comment']}"))
+    rows.append(_row("subhead", "Actual \\ Predicted", *labels))
+    for true_label in labels:
+        rows.append(_row("data", true_label, *[section["confusion_matrix"][true_label].get(p, 0) for p in labels]))
+    rows.append(_blank())
+    return rows
 
-        per_class_rows = [
-            (label, s["precision"], s["recall"], s["f1"], s["support"])
-            for label, s in sorted(section["per_class"].items())
-        ]
-        _write_csv(output_dir / f"{filename}_per_label.csv", ["Label", "Precision", "Recall", "F1", "Support"], per_class_rows)
 
-        labels = sorted(section["confusion_matrix"].keys())
-        cm_rows = [
-            [label] + [section["confusion_matrix"][label].get(p, 0) for p in labels]
-            for label in labels
-        ]
-        _write_csv(output_dir / f"{filename}_confusion_matrix.csv", ["Actual \\ Predicted"] + labels, cm_rows)
+def _defect_fields_rows(section: dict) -> list:
+    rows = [
+        _row("section", "DEFECT_FIELDS — which specific fields it flagged as broken"),
+        _blank(),
+        _row("subhead", "Metric", "Value", "What it means"),
+        _row("data", "Exact-match accuracy", _pct(section["exact_match_accuracy"]), section["exact_match_accuracy_comment"]),
+        _row("data", "Mean Jaccard overlap", section["mean_jaccard_similarity"], section["mean_jaccard_similarity_comment"]),
+        _blank(),
+        _row("desc", f"Per-field breakdown — {section['per_field_comment']}"),
+        _row("subhead", "Field", "Precision", "Recall"),
+    ]
+    for field, stats in sorted(section["per_field"].items()):
+        rows.append(_row("data", field, stats["precision"], stats["recall"]))
+    rows.append(_blank())
+    return rows
 
-        if subset_note:
-            _write_csv(output_dir / f"{filename}_subset.csv", ["Note"], [[subset_note]])
 
-    multinomial_csv("category", report["category"])
-    multinomial_csv("status", report["status"])
-    multinomial_csv(
-        "review_reason", report["review_reason"],
-        _render_subset_line(report["review_reason"]["subset"], "needed review"),
-    )
+def _has_defect_rows(section: dict) -> list:
+    cm = section["confusion_matrix"]
+    return [
+        _row("section", "HAS_DEFECT — yes/no, did it think this shipment had a problem"),
+        _blank(),
+        _row("subhead", "Metric", "Value", "What it means"),
+        _row("data", "Accuracy", _pct(section["accuracy"]), section["accuracy_comment"]),
+        _row("data", "Precision", section["precision"], section["precision_comment"]),
+        _row("data", "Recall", section["recall"], section["recall_comment"]),
+        _row("data", "F1", section["f1"], section["f1_comment"]),
+        _row("data", "Cohen's Kappa", section["cohens_kappa"], section["cohens_kappa_comment"]),
+        _blank(),
+        _row("desc", f"Confusion matrix — {section['confusion_matrix_comment']}"),
+        _row("subhead", "", "Predicted: defect", "Predicted: no defect"),
+        _row("data", "Actual: defect", cm["tp"], cm["fn"]),
+        _row("data", "Actual: no defect", cm["fp"], cm["tn"]),
+        _blank(),
+    ]
 
-    df = report["defect_fields"]
-    _write_csv(output_dir / "defect_fields_summary.csv", ["Metric", "Value"], [
-        ("Exact-match accuracy", _pct(df["exact_match_accuracy"])),
-        ("Mean Jaccard overlap", df["mean_jaccard_similarity"]),
-    ])
-    per_field_rows = [(f, s["precision"], s["recall"]) for f, s in sorted(df["per_field"].items())]
-    _write_csv(output_dir / "defect_fields_per_field.csv", ["Field", "Precision", "Recall"], per_field_rows)
-    _write_csv(output_dir / "defect_fields_subset.csv", ["Note"],
-               [[_render_subset_line(df["subset"], "had a defect")]])
 
-    hd = report["has_defect"]
-    cm = hd["confusion_matrix"]
-    _write_csv(output_dir / "has_defect_summary.csv", ["Metric", "Value"], [
-        ("Accuracy", _pct(hd["accuracy"])),
-        ("Precision", hd["precision"]),
-        ("Recall", hd["recall"]),
-        ("F1", hd["f1"]),
-        ("Cohen's Kappa", hd["cohens_kappa"]),
-    ])
-    _write_csv(output_dir / "has_defect_confusion_matrix.csv",
-               ["", "Predicted: defect", "Predicted: no defect"],
-               [["Actual: defect", cm["tp"], cm["fn"]], ["Actual: no defect", cm["fp"], cm["tn"]]])
-    _write_csv(output_dir / "has_defect_subset.csv", ["Note"],
-               [[_render_subset_line(hd["subset"], "had a defect")]])
+def _mistakes_rows(report: dict) -> list:
+    rows = [_row("section", "MISTAKES"), _blank()]
 
-    mistake_rows = []
-    for field_name in ("category", "status", "review_reason"):
-        for err in report[field_name]["errors"]:
-            mistake_rows.append((field_name, err["email_id"], err["true"], err["predicted"], "", ""))
-    for err in df["errors"]:
-        mistake_rows.append((
-            "defect_fields", err["email_id"],
-            ", ".join(err["true"]) or "(none)", ", ".join(err["predicted"]) or "(none)",
-            ", ".join(err["missing"]), ", ".join(err["extra"]),
-        ))
-    for err in hd["errors"]:
-        mistake_rows.append(("has_defect", err["email_id"], err["true"], err["predicted"], "", ""))
-    _write_csv(output_dir / "mistakes.csv", ["Field", "Email ID", "Actual", "Predicted", "Missing", "Extra"], mistake_rows)
-
-    if recommendations.get("error"):
-        _write_csv(output_dir / "ai_recommendations.csv", ["Error"], [[recommendations["error"]]])
-    else:
-        rec_rows = []
-        for item in recommendations["harness_changes"]:
-            if isinstance(item, dict):
-                rec_rows.append(("Harness change", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
-        for item in recommendations["prompt_changes"]:
-            if isinstance(item, dict):
-                rec_rows.append(("Prompt change", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
-        for item in recommendations["general_advice"]:
-            if isinstance(item, dict):
-                rec_rows.append(("General advice", "", item.get("observation", ""), item.get("why", "")))
-        if rec_rows:
-            _write_csv(output_dir / "ai_recommendations.csv", ["Type", "File", "Change / observation", "Why"], rec_rows)
+    def multinomial_group(title: str, section: dict):
+        errors = section["errors"]
+        rows.append(_row("subhead", title, "Total mistakes", len(errors)))
+        if errors:
+            rows.append(_row("subhead", "Email ID", "Actual", "Predicted"))
+            for err in errors:
+                rows.append(_row("data", err["email_id"], err["true"], err["predicted"]))
         else:
-            _write_csv(output_dir / "ai_recommendations.csv", ["Note"], [
-                ["All three lists came back empty — raw LLM response below, for debugging:"],
-                [json.dumps(recommendations.get("raw_response"))],
-            ])
+            rows.append(_row("note", "no mistakes"))
+        rows.append(_blank())
+
+    multinomial_group("CATEGORY MISTAKES", report["category"])
+    multinomial_group("STATUS MISTAKES", report["status"])
+    multinomial_group("REVIEW_REASON MISTAKES", report["review_reason"])
+
+    df_errors = report["defect_fields"]["errors"]
+    rows.append(_row("subhead", "DEFECT_FIELDS MISTAKES", "Total mistakes", len(df_errors)))
+    if df_errors:
+        rows.append(_row("subhead", "Email ID", "Actual", "Predicted", "Missing", "Extra"))
+        for err in df_errors:
+            rows.append(_row(
+                "data", err["email_id"],
+                ", ".join(err["true"]) or "(none)", ", ".join(err["predicted"]) or "(none)",
+                ", ".join(err["missing"]), ", ".join(err["extra"]),
+            ))
+    else:
+        rows.append(_row("note", "no mistakes"))
+    rows.append(_blank())
+
+    hd_errors = report["has_defect"]["errors"]
+    rows.append(_row("subhead", "HAS_DEFECT MISTAKES", "Total mistakes", len(hd_errors)))
+    if hd_errors:
+        rows.append(_row("subhead", "Email ID", "Actual", "Predicted"))
+        for err in hd_errors:
+            rows.append(_row("data", err["email_id"], err["true"], err["predicted"]))
+    else:
+        rows.append(_row("note", "no mistakes"))
+    rows.append(_blank())
+
+    return rows
+
+
+def _recommendations_rows(recommendations: dict) -> list:
+    rows = [
+        _row("section", "AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying."),
+        _blank(),
+    ]
+    if recommendations.get("error"):
+        rows.append(_row("data", "Could not generate recommendations", recommendations["error"]))
+        return rows
+
+    def items_group(title: str, items: list, item_key: str):
+        rows.append(_row("desc", title))
+        if items:
+            rows.append(_row("subhead", "File", "Change", "Why") if item_key == "change" else _row("subhead", "Observation", "Why"))
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item_key == "change":
+                    rows.append(_row("data", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
+                else:
+                    rows.append(_row("data", item.get("observation", ""), item.get("why", "")))
+        else:
+            rows.append(_row("note", "(none suggested)"))
+        rows.append(_blank())
+
+    items_group("Hardcoded harness changes to consider (evaluator.py logic, no prompt involved)",
+                recommendations["harness_changes"], "change")
+    items_group("Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py)",
+                recommendations["prompt_changes"], "change")
+    items_group("General advice (model choice, data quality, or anything else outside harness/prompt tweaks)",
+                recommendations["general_advice"], "observation")
+
+    if not recommendations["harness_changes"] and not recommendations["prompt_changes"] and not recommendations["general_advice"]:
+        rows.append(_row("note", "All three lists above came back empty — raw LLM response, for debugging:"))
+        rows.append(_row("data", json.dumps(recommendations.get("raw_response"))))
+        rows.append(_blank())
+
+    return rows
+
+
+def _write_xlsx(path: Path, rows: list) -> None:
+    """Writes one worksheet, top to bottom, applying a style per row (bold
+    section banners, bold column headers, wrapped long text) so the report
+    reads cleanly without anyone needing to manually resize a column."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report Card"
+
+    row_idx = 1
+    max_cols = 1
+    for style, cells in rows:
+        if not cells:
+            row_idx += 1
+            continue
+        style_def = _XLSX_STYLES.get(style)
+        for col_idx, value in enumerate(cells, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            if style_def:
+                cell.font = style_def["font"]
+                if "fill" in style_def:
+                    cell.fill = style_def["fill"]
+            wrap = isinstance(value, str) and len(value) > _WRAP_THRESHOLD
+            cell.alignment = Alignment(wrap_text=wrap, vertical="top")
+        if style in _BANNER_STYLES and len(cells) == 1:
+            ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=_BANNER_SPAN)
+        max_cols = max(max_cols, len(cells))
+        row_idx += 1
+
+    column_widths = [34, 16, 14, 14, 60]
+    for col_idx in range(1, max(max_cols, len(column_widths)) + 1):
+        width = column_widths[col_idx - 1] if col_idx <= len(column_widths) else 16
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
+def render_xlsx(report: dict, recommendations: dict, output_path: Path,
+                 title: str = "THE INVIGILATOR — Pipeline Report Card", extra_summary_rows: list = None) -> None:
+    """Writes the whole report card — header, per-field stats, overall
+    summary, grouped mistakes, and AI recommendations — as ONE combined
+    Excel workbook (stacked sections on a single sheet, not many small
+    files), formatted so nothing needs manual column resizing to read."""
+    rollups = report["rollups"]
+    rows = [
+        _row("title", title),
+        _row("data", "Run by", _git_username()),
+        _row("data", "Evaluated at", report["evaluated_at"]),
+        _row("data", "AI recommendations powered by", _llm_info_line()),
+        _blank(),
+    ]
+    if extra_summary_rows:
+        rows.extend(_row("data", label, value) for label, value in extra_summary_rows)
+        rows.append(_blank())
+    rows += [
+        _row("subhead", "Field", "Value", "Coverage %", "What it means"),
+        _row("data", "Emails in answer key", report["ground_truth_count"], "", ""),
+        _row("data", "Emails in submission", report["submission_count"], "", ""),
+        _row("data", "Emails actually graded", report["evaluated_count"], _pct(rollups["coverage"]), rollups["coverage_comment"]),
+        _row("data", "Missing from submission", ", ".join(report["missing_in_submission"]) or "none", "", ""),
+        _row("data", "Extra in submission, not in answer key", ", ".join(report["extra_in_submission"]) or "none", "", ""),
+        _blank(),
+    ]
+
+    rows += _multinomial_rows(
+        "CATEGORY — what type of email it thought this was",
+        "(BL_COMPARISON / SI_REQUEST / INVOICE_QUERY / GENERAL / SPAM)",
+        report["category"],
+    )
+    rows += _multinomial_rows(
+        "STATUS — the overall verdict on the shipment documents",
+        "(OK / MISMATCH / NEEDS_REVIEW)",
+        report["status"],
+    )
+    rows += _multinomial_rows(
+        "REVIEW_REASON — why it asked a human to take a look",
+        "(only set when status is NEEDS_REVIEW)",
+        report["review_reason"],
+    )
+    rows.append(_subset_row(report["review_reason"]["subset"], "needed review"))
+    rows.append(_blank())
+
+    rows += _defect_fields_rows(report["defect_fields"])
+    rows.append(_subset_row(report["defect_fields"]["subset"], "had a defect"))
+    rows.append(_blank())
+
+    rows += _has_defect_rows(report["has_defect"])
+    rows.append(_subset_row(report["has_defect"]["subset"], "had a defect"))
+    rows.append(_blank())
+
+    rows += [
+        _row("section", "OVERALL SUMMARY"),
+        _blank(),
+        _row("subhead", "Metric", "Value", "Correct", "Total", "What it means"),
+        _row("data", "Row-level exact match", _pct(rollups["row_exact_match_rate"]),
+             rollups["row_exact_match_count"], rollups["row_exact_match_total"],
+             rollups["row_exact_match_rate_comment"]),
+        _row("data", "Processing-failure rate", _pct(rollups["processing_failure_rate"]),
+             rollups["processing_failure_count"], "",
+             rollups["processing_failure_rate_comment"]),
+        _row("data", "Coverage", _pct(rollups["coverage"]), "", "", rollups["coverage_comment"]),
+        _blank(),
+    ]
+
+    rows += _mistakes_rows(report)
+    rows += _recommendations_rows(recommendations)
+
+    _write_xlsx(output_path, rows)
 
 
 def main():
@@ -1010,13 +918,13 @@ def main():
     recommendations = get_ai_recommendations(report, inbox)
 
     x = _next_index()
-    report_dir = REPORT_CARD_DIR / f"performance_{x}"
+    report_path = REPORT_CARD_DIR / f"performance_{x}.xlsx"
     graph_path = SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg"
 
-    render_csv(report, recommendations, report_dir)
+    render_xlsx(report, recommendations, report_path)
     render_graphs(report, graph_path)
 
-    print(f"Wrote {report_dir}/*.csv")
+    print(f"Wrote {report_path}")
     print(f"Wrote {graph_path}")
     print(f"  evaluated {report['evaluated_count']}/{report['ground_truth_count']} emails")
     print(f"  category accuracy:  {_pct(report['category']['accuracy'])}")
