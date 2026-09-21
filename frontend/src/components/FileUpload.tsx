@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { 
-  FolderArchive, FileCode, FileSpreadsheet, HardDrive, 
-  Cloud, CheckCircle2, AlertCircle, ArrowRight, Loader2
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  FolderArchive, FileCode, FileSpreadsheet, HardDrive,
+  Cloud, Database, CheckCircle2, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -10,7 +10,7 @@ interface FileUploadProps {
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
-  const [sourceType, setSourceType] = useState<'local' | 'cloud' | 'drive'>('local');
+  const [sourceType, setSourceType] = useState<'local' | 'cloud' | 'drive' | 'database'>('local');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatusMsg, setUploadStatusMsg] = useState('');
 
@@ -25,6 +25,23 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   // Google Drive Shared/Public Folder Links or IDs
   const [driveInboxUrl, setDriveInboxUrl] = useState('');
   const [driveAttachmentsUrl, setDriveAttachmentsUrl] = useState('');
+
+  // Database connection — defaults to whatever the backend is already
+  // configured with (fetched from /api/config), editable to point at any
+  // other Supabase project instead.
+  const [dbUrl, setDbUrl] = useState('');
+  const [dbKey, setDbKey] = useState('');
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === 'success' && data.default_supabase_url) {
+          setDbUrl(data.default_supabase_url);
+        }
+      })
+      .catch(() => {/* Database tab still works with the field left blank — backend falls back to its own default */});
+  }, []);
 
   const inboxInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentsInputRef = useRef<HTMLInputElement | null>(null);
@@ -46,10 +63,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
     }
   };
 
-  const canSubmit = 
+  const canSubmit =
     (sourceType === 'local' && inboxFiles.length > 0 && attachmentFiles.length > 0) ||
     (sourceType === 'cloud' && cloudInboxUri.trim() !== '' && cloudAttachmentsUri.trim() !== '') ||
-    (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '');
+    (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '') ||
+    sourceType === 'database';
 
   const handleStartProcessing = async () => {
     setIsUploading(true);
@@ -72,10 +90,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
           attFolder?.file(f.name, f);
         });
 
-        const zipBlob = await zip.generateAsync({ 
-          type: 'blob', 
-          compression: 'DEFLATE', 
-          compressionOptions: { level: 4 } 
+        const zipBlob = await zip.generateAsync({
+          type: 'blob',
+          compression: 'DEFLATE',
+          compressionOptions: { level: 4 }
         });
 
         setUploadStatusMsg('Uploading bundled archive...');
@@ -85,6 +103,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         formData.append('email_count', String(inboxFiles.length));
 
         res = await fetch('/api/ingest', { method: 'POST', body: formData });
+      } else if (sourceType === 'database') {
+        setUploadStatusMsg('Reading dataset already in the database...');
+        res = await fetch('/api/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_type: 'database',
+            started_at: startedAt,
+            supabase_url: dbUrl.trim(),
+            supabase_key: dbKey.trim(),
+          })
+        });
       } else {
         setUploadStatusMsg(`Syncing from remote ${sourceType}...`);
         res = await fetch('/api/ingest', {
@@ -127,19 +157,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         </div>
 
         <div className="flex bg-slate-100 p-1 rounded-xl">
-          {(['local', 'cloud', 'drive'] as const).map((mode) => (
+          {(['local', 'database', 'cloud', 'drive'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
               onClick={() => setSourceType(mode)}
               disabled={isUploading}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
-                sourceType === mode 
-                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80' 
+                sourceType === mode
+                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
                   : 'text-slate-500 hover:text-slate-800 disabled:opacity-50'
               }`}
             >
               {mode === 'local' && <HardDrive className="w-3.5 h-3.5" />}
+              {mode === 'database' && <Database className="w-3.5 h-3.5" />}
               {mode === 'cloud' && <Cloud className="w-3.5 h-3.5" />}
               {mode === 'drive' && <FolderArchive className="w-3.5 h-3.5" />}
               {mode}
@@ -151,9 +182,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
       {/* 1. LOCAL DIRECTORY MODE */}
       {sourceType === 'local' && (
         <div className="grid grid-cols-2 gap-4">
-          <div 
+          <button
+            type="button"
             onClick={() => inboxInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+            className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all w-full ${
               inboxFiles.length > 0 ? 'border-blue-400 bg-blue-50/20' : 'border-slate-200 hover:border-slate-300 bg-slate-50/60'
             }`}
           >
@@ -182,11 +214,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
                 <span className="mt-3.5 text-xs text-blue-600 font-semibold hover:underline">Choose folder</span>
               )}
             </div>
-          </div>
+          </button>
 
-          <div 
+          <button
+            type="button"
             onClick={() => attachmentsInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+            className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all w-full ${
               attachmentFiles.length > 0 ? 'border-emerald-400 bg-emerald-50/20' : 'border-slate-200 hover:border-slate-300 bg-slate-50/60'
             }`}
           >
@@ -215,6 +248,53 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
                 <span className="mt-3.5 text-xs text-emerald-600 font-semibold hover:underline">Choose folder</span>
               )}
             </div>
+          </button>
+        </div>
+      )}
+
+      {/* DATABASE INGESTION — reads from a Supabase project's storage
+          directly, no upload needed. Defaults to whichever project this
+          server is already configured with; editable to point at any
+          other Supabase project instead. */}
+      {sourceType === 'database' && (
+        <div className="space-y-4 py-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Database className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span>Runs the pipeline over every email already stored there — nothing to upload.</span>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Supabase URL
+            </label>
+            <input
+              type="text"
+              value={dbUrl}
+              onChange={(e) => setDbUrl(e.target.value)}
+              placeholder="https://your-project.supabase.co"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
+            />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Defaults to the project this server is already connected to — change it to point at
+              a different Supabase project instead.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              Supabase Key <span className="normal-case font-sans text-slate-400">(optional)</span>
+            </label>
+            <input
+              type="password"
+              value={dbKey}
+              onChange={(e) => setDbKey(e.target.value)}
+              placeholder="Leave blank to use this server's configured key"
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
+            />
+            <p className="text-[11px] text-slate-400 mt-1 font-mono">
+              Only needed if you changed the URL above to a project this server doesn't already
+              have a key for.
+            </p>
           </div>
         </div>
       )}
@@ -297,7 +377,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
       <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
           <AlertCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-          <span>{uploadStatusMsg || (sourceType === 'local' ? 'Files will be compressed and verified in batch' : `Syncing via ${sourceType}`)}</span>
+          <span>{uploadStatusMsg || (
+            sourceType === 'local' ? 'Files will be compressed and verified in batch' :
+            sourceType === 'database' ? 'No files needed — reads directly from the database' :
+            `Syncing via ${sourceType}`
+          )}</span>
         </div>
 
         <button

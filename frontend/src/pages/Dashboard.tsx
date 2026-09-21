@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Ship, Search, Bell, Plus, Check, X, 
-  AlertCircle, ArrowUpRight, Loader2, Terminal
+import {
+  Search, Bell, Plus, Check, X,
+  AlertCircle, AlertTriangle, CheckCircle2, FileWarning, History,
+  ArrowUpRight, Loader2, Terminal
 } from 'lucide-react';
 import { FileUpload } from '../components/FileUpload';
-import { RunSummary, EmailRecord } from '../batch';
+import { RunSummary, EmailRecord, OriginalEmail } from '../batch';
 
 function formatBatchDate(isoString?: string) {
   if (!isoString) return 'Recent Batch';
@@ -18,13 +19,33 @@ function formatBatchTime(isoString?: string) {
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+// Human-readable category labels (PRD §4.8 item 10) — raw enum values like
+// "INVOICE_QUERY" must never reach the screen as-is.
+function categoryLabel(category: string): string {
+  if (!category) return 'Unknown';
+  if (category === 'BL_COMPARISON') return 'Comparison';
+  return category
+    .toLowerCase()
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function reviewReasonLabel(reason?: string | null): string {
+  if (!reason) return '';
+  return reason
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 export const Dashboard: React.FC = () => {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<EmailRecord | null>(null);
-  
+
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'MISMATCH' | 'NEEDS_REVIEW' | 'OK' | 'SPAM'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -38,9 +59,35 @@ export const Dashboard: React.FC = () => {
   const eventSourceRef = useRef<EventSource | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Human-review resolve form (PRD §2.4-F, §4.9 POST /resolve contract)
+  const [resolveNotes, setResolveNotes] = useState('');
+  const [resolveAwaiting, setResolveAwaiting] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+
+  // Source-evidence drawer (PRD §4.8 item 4)
+  const [showSourceDrawer, setShowSourceDrawer] = useState(false);
+  const [sourceState, setSourceState] = useState<{
+    original: OriginalEmail | null;
+    si: string | null;
+    bl: string | null;
+    loading: boolean;
+    error: string | null;
+  }>({ original: null, si: null, bl: null, loading: false, error: null });
+
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  // Reset per-case UI state whenever the selected email changes, so a stale
+  // resolve form or drawer from the previous case never bleeds into this one.
+  useEffect(() => {
+    setResolveNotes('');
+    setResolveAwaiting(false);
+    setResolveError(null);
+    setShowSourceDrawer(false);
+    setSourceState({ original: null, si: null, bl: null, loading: false, error: null });
+  }, [selectedEmail?.email_id]);
 
   const fetchRunsList = async () => {
     try {
@@ -135,7 +182,7 @@ export const Dashboard: React.FC = () => {
     else if (activeFilter === 'OK') matchesFilter = item.automated_status === 'OK' && item.category !== 'SPAM';
     else if (activeFilter === 'SPAM') matchesFilter = item.category === 'SPAM';
 
-    const matchesSearch = 
+    const matchesSearch =
       item.email_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.trace?.classification?.reason || '').toLowerCase().includes(searchQuery.toLowerCase());
@@ -143,20 +190,123 @@ export const Dashboard: React.FC = () => {
     return matchesFilter && matchesSearch;
   });
 
+  // Derived live from the emails actually loaded for this run, not the
+  // runs table's aggregate columns — those only get filled in once a batch
+  // finishes (finalizeRunRecord), so an interrupted/still-processing run
+  // would otherwise show a stale "520" next to real "0" counts everywhere
+  // else, which is what caused the confusing all-zero-but-520 display.
+  const mismatchCount = emails.filter((e) => e.automated_status === 'MISMATCH').length;
+  const needsReviewCount = emails.filter((e) => e.automated_status === 'NEEDS_REVIEW').length;
+  const clearCount = emails.filter((e) => e.automated_status === 'OK' && e.category !== 'SPAM').length;
+  const spamCount = emails.filter((e) => e.category === 'SPAM').length;
+
   const comparison = selectedEmail?.trace?.comparison;
   const comparisons = comparison?.field_comparisons || {};
   const classification = selectedEmail?.trace?.classification;
   const mismatchFieldCount = selectedEmail?.defect_fields?.length || 0;
+  const isProcessingFailure = !!selectedEmail?.is_processing_failure;
+  const wasHumanCorrected = !!selectedEmail && selectedEmail.current_status !== selectedEmail.automated_status;
+  const currentStatus = selectedEmail?.current_status;
+
+  const resolveEmail = async (decision?: 'OK' | 'MISMATCH') => {
+    if (!selectedEmail) return;
+    setIsResolving(true);
+    setResolveError(null);
+    try {
+      // Was previously `resolveAwaiting ? undefined : decision` — that
+      // silently dropped a reviewer's decision if the checkbox happened to
+      // be checked, even when they clicked "Mark OK"/"Confirm mismatch"
+      // directly. The backend already resolves decisively whenever
+      // `decision` is present (db.py's resolve_review_item), so just pass
+      // it through as given.
+      const res = await fetch(`/api/reviews/${encodeURIComponent(selectedEmail.email_id)}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision,
+          notes: resolveNotes,
+          awaiting_sender_response: resolveAwaiting,
+          run_id: selectedEmail.run_id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.status === 'error') {
+        throw new Error(data.message || 'Resolve failed');
+      }
+
+      const patch: Partial<EmailRecord> = {
+        current_status: data.current_status ?? selectedEmail.current_status,
+        current_review_reason:
+          'current_review_reason' in data ? data.current_review_reason : selectedEmail.current_review_reason,
+        awaiting_sender_response: data.awaiting_sender_response ?? selectedEmail.awaiting_sender_response,
+      };
+      const updated = { ...selectedEmail, ...patch };
+      setSelectedEmail(updated);
+      setEmails((prev) => prev.map((e) => (e.email_id === selectedEmail.email_id ? { ...e, ...patch } : e)));
+      setResolveNotes('');
+      setResolveAwaiting(false);
+    } catch (err: any) {
+      setResolveError(err?.message || 'Failed to resolve this case.');
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  const openSourceDrawer = async () => {
+    if (!selectedEmail) return;
+    setShowSourceDrawer(true);
+    setSourceState((s) => ({ ...s, loading: true, error: null }));
+
+    const runSuffix = activeRunId ? `run_id=${encodeURIComponent(activeRunId)}` : '';
+    try {
+      const originalRes = await fetch(
+        `/api/emails/${encodeURIComponent(selectedEmail.email_name)}/original${runSuffix ? `?${runSuffix}` : ''}`
+      );
+      const originalData = await originalRes.json();
+      const original: OriginalEmail | null = originalData.status === 'success' ? originalData : null;
+
+      const cmp = selectedEmail.trace?.comparison;
+      let si: string | null = null;
+      let bl: string | null = null;
+
+      if (cmp?.si_path) {
+        const r = await fetch(
+          `/api/attachments/content?path=${encodeURIComponent(cmp.si_path)}${runSuffix ? `&${runSuffix}` : ''}`
+        );
+        const d = await r.json();
+        si = d.status === 'success' ? d.content : null;
+      }
+      if (cmp?.bl_path) {
+        const r = await fetch(
+          `/api/attachments/content?path=${encodeURIComponent(cmp.bl_path)}${runSuffix ? `&${runSuffix}` : ''}`
+        );
+        const d = await r.json();
+        bl = d.status === 'success' ? d.content : null;
+      }
+
+      setSourceState({
+        original,
+        si,
+        bl,
+        loading: false,
+        error: original ? null : 'No readable content extracted for the original email.',
+      });
+    } catch (err: any) {
+      setSourceState({ original: null, si: null, bl: null, loading: false, error: err?.message || 'Failed to load source evidence.' });
+    }
+  };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#fcfcfd] text-[#1e293b] font-sans antialiased select-none">
-      
-      {/* 1. TOP NAVBAR[cite: 9] */}
+    // Desktop-only for this hackathon build (PRD §4.8 item 9) — a stated
+    // requirement, not an accident, rather than a real responsive rebuild.
+    <div className="h-screen w-screen min-w-[1280px] flex flex-col bg-[#fcfcfd] text-[#1e293b] font-sans antialiased select-none overflow-x-auto">
+
+      {/* 1. TOP NAVBAR */}
       <header className="h-14 border-b border-slate-200 bg-white px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-2 text-slate-900 font-bold text-base tracking-tight">
-            <Ship className="w-5 h-5 text-slate-800" />
-            <span>MinionShip</span>
+            <img src="/logo.png" alt="MinionLens" className="w-10 h-10 object-contain" />
+            <span>MinionLens</span>
           </div>
           <span className="text-slate-300 font-light mx-1">|</span>
           <span className="text-xs text-slate-500 font-medium">Document Verification</span>
@@ -184,8 +334,8 @@ export const Dashboard: React.FC = () => {
 
       {/* 2. THREE-COLUMN MAIN BODY */}
       <div className="flex-1 flex overflow-hidden">
-        
-        {/* COLUMN 1: LEFT SIDEBAR (DYNAMIC TRACK PROGRESS BUTTON)[cite: 9] */}
+
+        {/* COLUMN 1: LEFT SIDEBAR (DYNAMIC TRACK PROGRESS BUTTON) */}
         <aside className="w-64 border-r border-slate-200 bg-white p-4 flex flex-col justify-between shrink-0">
           <div className="flex-1 flex flex-col overflow-hidden">
             {isProcessing ? (
@@ -219,12 +369,13 @@ export const Dashboard: React.FC = () => {
               {runs.map((batch) => {
                 const isActive = batch.run_id === activeRunId;
                 return (
-                  <div
+                  <button
                     key={batch.run_id}
+                    type="button"
                     onClick={() => loadBatch(batch.run_id)}
-                    className={`p-2.5 rounded-lg cursor-pointer transition-all flex items-center justify-between border ${
-                      isActive 
-                        ? 'bg-slate-100/90 border-slate-300 shadow-2xs font-semibold' 
+                    className={`w-full text-left p-2.5 rounded-lg cursor-pointer transition-all flex items-center justify-between border ${
+                      isActive
+                        ? 'bg-slate-100/90 border-slate-300 shadow-2xs font-semibold'
                         : 'border-transparent hover:bg-slate-50 text-slate-600'
                     }`}
                   >
@@ -249,7 +400,7 @@ export const Dashboard: React.FC = () => {
                         </span>
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -260,14 +411,17 @@ export const Dashboard: React.FC = () => {
           </div>
         </aside>
 
-        {/* COLUMN 2: CENTER EMAIL QUEUE LIST[cite: 9] */}
+        {/* COLUMN 2: CENTER EMAIL QUEUE LIST */}
         <section className="w-80 border-r border-slate-200 bg-white flex flex-col shrink-0">
           <div className="p-3.5 border-b border-slate-100">
             <div className="text-xs font-bold text-slate-900">
-              {formatBatchDate(selectedRun?.started_at)}[cite: 1]
+              {formatBatchDate(selectedRun?.started_at)}
             </div>
             <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
-              Batch: {selectedRun?.run_id ? selectedRun.run_id.slice(-8) : '—'} · {selectedRun?.email_count || 0} emails[cite: 1]
+              Batch: {selectedRun?.run_id ? selectedRun.run_id.slice(-8) : '—'} · {emails.length} processed
+              {selectedRun?.email_count && selectedRun.email_count !== emails.length
+                ? ` (of ${selectedRun.email_count} uploaded)`
+                : ''}
             </div>
 
             <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 text-[11px]">
@@ -277,7 +431,7 @@ export const Dashboard: React.FC = () => {
                   activeFilter === 'ALL' ? 'bg-[#1e293b] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                All {selectedRun?.email_count || emails.length}
+                All {emails.length}
               </button>
               <button
                 onClick={() => setActiveFilter('MISMATCH')}
@@ -285,7 +439,7 @@ export const Dashboard: React.FC = () => {
                   activeFilter === 'MISMATCH' ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'
                 }`}
               >
-                Mismatches {selectedRun?.mismatch_count || 0}
+                Mismatches {mismatchCount}
               </button>
               <button
                 onClick={() => setActiveFilter('NEEDS_REVIEW')}
@@ -293,7 +447,7 @@ export const Dashboard: React.FC = () => {
                   activeFilter === 'NEEDS_REVIEW' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
                 }`}
               >
-                Needs review {selectedRun?.needs_review_count || 0}
+                Needs review {needsReviewCount}
               </button>
               <button
                 onClick={() => setActiveFilter('OK')}
@@ -301,7 +455,7 @@ export const Dashboard: React.FC = () => {
                   activeFilter === 'OK' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                 }`}
               >
-                Clear {selectedRun?.clear_count || 0}
+                Clear {clearCount}
               </button>
               <button
                 onClick={() => setActiveFilter('SPAM')}
@@ -309,28 +463,47 @@ export const Dashboard: React.FC = () => {
                   activeFilter === 'SPAM' ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
-                Spam {selectedRun?.spam_count || 0}
+                Spam {spamCount}
               </button>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {filteredEmails.map((item) => {
+            {emails.length === 0 ? (
+              <div className="p-4 text-xs text-slate-400 leading-relaxed">
+                {selectedRun?.email_count ? (
+                  <>
+                    This run uploaded {selectedRun.email_count} email(s) but none have finished
+                    processing yet — either it's still running, or it was interrupted (e.g. the
+                    backend restarted mid-batch) before any email was saved. Click{' '}
+                    <strong>Run new batch</strong> to start (or restart) processing.
+                  </>
+                ) : (
+                  <>No emails in this run.</>
+                )}
+              </div>
+            ) : filteredEmails.length === 0 ? (
+              <div className="p-4 text-xs text-slate-400">No emails match this filter/search.</div>
+            ) : (
+              filteredEmails.map((item) => {
               const isSelected = item.email_id === selectedEmail?.email_id;
               const isMismatch = item.automated_status === 'MISMATCH';
               const isReview = item.automated_status === 'NEEDS_REVIEW';
+              const isCorrected = item.current_status !== item.automated_status;
 
               return (
-                <div
+                <button
                   key={item.email_id}
+                  type="button"
                   onClick={() => setSelectedEmail(item)}
-                  className={`p-3 cursor-pointer transition-colors relative ${
+                  className={`w-full text-left p-3 cursor-pointer transition-colors relative block ${
                     isSelected ? 'bg-[#fef2f2]/60' : 'hover:bg-slate-50/80'
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-1.5">
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        item.is_processing_failure ? 'bg-slate-400' :
                         isMismatch ? 'bg-red-500' : isReview ? 'bg-amber-500' : item.category === 'SPAM' ? 'bg-slate-300' : 'bg-emerald-500'
                       }`} />
                       <span className="text-xs font-bold text-slate-800 line-clamp-1">
@@ -346,18 +519,23 @@ export const Dashboard: React.FC = () => {
                     {item.trace?.classification?.reason || `Subject: Inquiry ${item.email_id}`}
                   </p>
 
-                  <div className="flex items-center gap-1.5 mt-2">
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                     <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">
-                      {item.category === 'BL_COMPARISON' ? 'Comparison' : item.category.toLowerCase().replace('_', ' ')}
+                      {categoryLabel(item.category)}
                     </span>
-                    {isMismatch && (
+                    {item.is_processing_failure && (
+                      <span className="text-[10px] bg-slate-200 text-slate-700 font-medium px-1.5 py-0.5 rounded">
+                        Processing failed
+                      </span>
+                    )}
+                    {!item.is_processing_failure && isMismatch && (
                       <span className="text-[10px] bg-red-100 text-red-700 font-medium px-1.5 py-0.5 rounded">
                         {item.defect_fields?.length || 1} field mismatch
                       </span>
                     )}
-                    {isReview && (
+                    {!item.is_processing_failure && isReview && (
                       <span className="text-[10px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.5 rounded">
-                        {item.automated_review_reason || 'Needs review'}
+                        {reviewReasonLabel(item.automated_review_reason) || 'Needs review'}
                       </span>
                     )}
                     {item.automated_status === 'OK' && item.category === 'BL_COMPARISON' && (
@@ -365,14 +543,20 @@ export const Dashboard: React.FC = () => {
                         No mismatch
                       </span>
                     )}
+                    {isCorrected && (
+                      <span className="text-[10px] bg-blue-100 text-blue-700 font-medium px-1.5 py-0.5 rounded">
+                        Corrected
+                      </span>
+                    )}
                   </div>
-                </div>
+                </button>
               );
-            })}
+              })
+            )}
           </div>
         </section>
 
-        {/* COLUMN 3: RIGHT DETAIL INSPECTION PANEL[cite: 9] */}
+        {/* COLUMN 3: RIGHT DETAIL INSPECTION PANEL */}
         <main className="flex-1 bg-white overflow-y-auto p-6">
           {selectedEmail ? (
             <div className="max-w-4xl space-y-6">
@@ -385,20 +569,77 @@ export const Dashboard: React.FC = () => {
                     Re: BL draft for booking {selectedEmail.email_id}
                   </h1>
                 </div>
-                <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-600 rounded-md">
-                  {selectedEmail.category === 'BL_COMPARISON' ? 'Document comparison' : selectedEmail.category}
-                </span>
+                <div className="flex items-center gap-2">
+                  {selectedEmail.current_review_reason && (
+                    <span className="text-xs font-semibold px-2.5 py-1 bg-amber-100 text-amber-800 rounded-md">
+                      {reviewReasonLabel(selectedEmail.current_review_reason)}
+                    </span>
+                  )}
+                  <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-600 rounded-md">
+                    {selectedEmail.category === 'BL_COMPARISON' ? 'Document comparison' : categoryLabel(selectedEmail.category)}
+                  </span>
+                </div>
               </div>
 
-              {selectedEmail.automated_status === 'MISMATCH' && (
+              {/* automated vs. current status marker (PRD §4.8 item 6) */}
+              {wasHumanCorrected && (
+                <div className="text-[11px] text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 flex items-center gap-2">
+                  <History className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Corrected by a reviewer — the pipeline originally decided{' '}
+                    <strong>{selectedEmail.automated_status}</strong>, current answer is{' '}
+                    <strong>{selectedEmail.current_status}</strong>.
+                  </span>
+                </div>
+              )}
+
+              {/* Status banners — every status gets one, including NEEDS_REVIEW
+                  and a processing failure (PRD §4.8 item 1 + item 5) */}
+              {isProcessingFailure ? (
+                <div className="p-3.5 bg-slate-100 border border-slate-300 rounded-xl flex items-start gap-3 text-slate-700">
+                  <FileWarning className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-bold">Processing failed</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      This is a system fault (an API call or a parser failed), not a document
+                      problem — there is nothing to review here. Re-run this email through a new
+                      batch to retry it.
+                    </div>
+                  </div>
+                </div>
+              ) : currentStatus === 'MISMATCH' ? (
                 <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800">
                   <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <div>
                     <div className="text-xs font-bold">
-                      Mismatch found — {mismatchFieldCount} of {Object.keys(comparisons).length || 7} fields differ
+                      Mismatch found — {mismatchFieldCount} of {Object.keys(comparisons).length} fields differ
                     </div>
                     <div className="text-[11px] text-red-600 mt-0.5">
                       {selectedEmail.defect_fields?.join(', ') || 'Fields'} do not match between SI and draft BL.
+                    </div>
+                  </div>
+                </div>
+              ) : currentStatus === 'NEEDS_REVIEW' ? (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-800">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-bold">
+                      Needs review{selectedEmail.current_review_reason ? ` — ${reviewReasonLabel(selectedEmail.current_review_reason)}` : ''}
+                    </div>
+                    <div className="text-[11px] text-amber-700 mt-0.5">
+                      {selectedEmail.awaiting_sender_response
+                        ? 'Marked as awaiting a response from the sender.'
+                        : 'The pipeline could not confidently decide this one on its own.'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3 text-emerald-800">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-xs font-bold">No mismatch detected</div>
+                    <div className="text-[11px] text-emerald-700 mt-0.5">
+                      All checked fields matched between SI and draft BL.
                     </div>
                   </div>
                 </div>
@@ -447,22 +688,72 @@ export const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-                  No document comparison performed. This email was categorized as <strong>{selectedEmail.category}</strong>.
+                  No document comparison performed. This email was categorized as <strong>{categoryLabel(selectedEmail.category)}</strong>.
                 </div>
               )}
 
-              <div className="flex items-center gap-3 pt-2">
-                <button className="px-4 py-2 bg-[#1e293b] hover:bg-[#0f172a] text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer">
-                  Confirm mismatch report
-                </button>
-                <button className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer">
-                  Send to human review
-                </button>
-                <button className="ml-auto text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1">
-                  <span>View source documents</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              {/* Resolve form + source drawer link — hidden for a processing
+                  failure (nothing to review), shown otherwise (PRD §2.4-F) */}
+              {!isProcessingFailure && (
+                <div className="pt-2 space-y-3">
+                  {(currentStatus === 'MISMATCH' || currentStatus === 'NEEDS_REVIEW') && (
+                    <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50/50">
+                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Resolve this case
+                      </div>
+                      <textarea
+                        value={resolveNotes}
+                        onChange={(e) => setResolveNotes(e.target.value)}
+                        placeholder="Notes — why you made this call, or why you can't yet"
+                        className="w-full text-xs border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:border-slate-400 resize-none"
+                        rows={2}
+                      />
+                      <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={resolveAwaiting}
+                          onChange={(e) => setResolveAwaiting(e.target.checked)}
+                        />
+                        Awaiting a response from the sender (leave undecided for now)
+                      </label>
+                      {resolveError && <div className="text-[11px] text-red-600">{resolveError}</div>}
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={isResolving || resolveAwaiting}
+                          onClick={() => resolveEmail('OK')}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                        >
+                          Mark OK
+                        </button>
+                        <button
+                          disabled={isResolving || resolveAwaiting}
+                          onClick={() => resolveEmail('MISMATCH')}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+                        >
+                          Confirm mismatch
+                        </button>
+                        {resolveAwaiting && (
+                          <button
+                            disabled={isResolving}
+                            onClick={() => resolveEmail(undefined)}
+                            className="px-4 py-2 bg-white hover:bg-slate-50 disabled:opacity-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+                          >
+                            {isResolving ? 'Saving…' : 'Save (no decision yet)'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={openSourceDrawer}
+                    className="text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>View source documents</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
               <div className="pt-6 border-t border-slate-100">
                 <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">
@@ -472,7 +763,7 @@ export const Dashboard: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     <span>
-                      <strong>Classified</strong> as document comparison request · confidence {classification?.confidence || 'high'}[cite: 2]
+                      <strong>Classified</strong> as {categoryLabel(selectedEmail.category)} · confidence {classification?.confidence || 'high'}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -484,11 +775,48 @@ export const Dashboard: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className={`w-1.5 h-1.5 rounded-full ${mismatchFieldCount > 0 ? 'bg-red-500' : 'bg-emerald-500'}`} />
                     <span>
-                      <strong>Compared</strong> values — {mismatchFieldCount > 0 ? `${mismatchFieldCount} mismatch found on ${selectedEmail.defect_fields?.join(', ')}` : 'all fields verified matching'}[cite: 1]
+                      <strong>Compared</strong> values — {mismatchFieldCount > 0 ? `${mismatchFieldCount} mismatch found on ${selectedEmail.defect_fields?.join(', ')}` : 'all fields verified matching'}
                     </span>
                   </div>
                 </div>
               </div>
+
+              {/* Audit log surface (PRD §4.8 item 7). The DB's
+                  unique(email_id, run_id) constraint means there's at most
+                  ONE audit row per email — a placeholder from the moment a
+                  case is first escalated, updated in place once a reviewer
+                  acts (never appended to) — so PostgREST embeds it as a
+                  single object or null, not an array. Only show it once
+                  resolved_at is set, so an untouched placeholder doesn't
+                  look like a real "awaiting sender response" action nobody
+                  actually took. */}
+              {(() => {
+                const auditRow = selectedEmail.review_audit_log;
+                if (!auditRow || !auditRow.resolved_at) return null;
+                return (
+                  <div className="pt-6 border-t border-slate-100">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                      <History className="w-3.5 h-3.5" />
+                      AUDIT LOG
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-600">
+                      {[auditRow].map((row) => (
+                        <div key={row.id} className="border border-slate-100 rounded-lg p-2.5">
+                          <div className="font-semibold text-slate-700">
+                            {row.action === 'resolved' ? 'Resolved' : row.action === 'awaiting_sender_response' ? 'Awaiting sender response' : 'Retried'}
+                            {row.resolved_by ? ` by ${row.resolved_by}` : ''}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            {row.human_decision ? `Decision: ${row.human_decision} · ` : ''}
+                            {new Date(row.resolved_at as string).toLocaleString()}
+                          </div>
+                          {row.notes && <div className="text-[11px] text-slate-500 mt-1">"{row.notes}"</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
             </div>
           ) : (
@@ -536,7 +864,7 @@ export const Dashboard: React.FC = () => {
                   </div>
 
                   <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                    <div 
+                    <div
                       className="h-full bg-blue-600 rounded-full transition-all duration-300"
                       style={{ width: `${progressPercent}%` }}
                     />
@@ -571,6 +899,62 @@ export const Dashboard: React.FC = () => {
                   handleStartStream(runId, count);
                 }}
               />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* DRAWER: SOURCE EVIDENCE (PRD §4.8 item 4) */}
+      {showSourceDrawer && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs" onClick={() => setShowSourceDrawer(false)}>
+          <div
+            className="bg-white h-full w-full max-w-lg shadow-2xl p-6 overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-slate-900">Source evidence</h2>
+              <button onClick={() => setShowSourceDrawer(false)} className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {sourceState.loading ? (
+              <div className="text-xs text-slate-400 flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div>
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Original email</div>
+                  {sourceState.original ? (
+                    <div className="text-xs border border-slate-200 rounded-lg p-3 space-y-1.5">
+                      <div><span className="font-semibold text-slate-500">From:</span> {sourceState.original.sender || '—'}</div>
+                      <div><span className="font-semibold text-slate-500">Subject:</span> {sourceState.original.subject || '—'}</div>
+                      <div className="whitespace-pre-wrap text-slate-600 pt-1 border-t border-slate-100 mt-1">
+                        {sourceState.original.body || 'no readable content extracted'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3">
+                      {sourceState.error || 'no readable content extracted'}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">SI attachment</div>
+                  <pre className="text-[11px] whitespace-pre-wrap border border-slate-200 rounded-lg p-3 max-h-64 overflow-y-auto text-slate-600">
+                    {sourceState.si ?? 'no readable content extracted'}
+                  </pre>
+                </div>
+
+                <div>
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">BL attachment</div>
+                  <pre className="text-[11px] whitespace-pre-wrap border border-slate-200 rounded-lg p-3 max-h-64 overflow-y-auto text-slate-600">
+                    {sourceState.bl ?? 'no readable content extracted'}
+                  </pre>
+                </div>
+              </div>
             )}
           </div>
         </div>

@@ -1,13 +1,16 @@
 """the_coach.py — the_invigilator.py's sibling for open-ended smoke runs.
 
-Run: `python the_coach.py` (no arguments) or `python the_coach.py N` (an
-optional email cap). Processes emails from the Supabase inbox one at a
-time, in the same order and through the same pipeline routes.py's
-create_run() uses (classify_email -> extract/compare for BL_COMPARISON
-emails -> report.build_report()), and keeps going until the FIRST of:
-inbox exhausted, a call raises (Ollama/API quota or rate-limit exhausted,
-after llm.py's own retries), or (if given) N emails have been processed.
-Whatever was successfully processed before that is this run's N.
+Run: `python the_coach.py` (no arguments, whole inbox) or
+`python the_coach.py N` (an optional email cap). Processes up to N emails
+(or the whole inbox) from the Supabase inbox concurrently — same
+max_workers=3 pool size as the real app's stream_batch_process()
+(routes.py) — through the same pipeline (classify_email -> extract/compare
+for BL_COMPARISON emails -> report.build_report()). process_email() itself
+(routes.py) already catches a pipeline-level failure (an LLM call that
+exhausted its retries, an extraction exception) and reports it as
+is_processing_failure rather than raising, so one email failing doesn't
+stop the run — every requested email gets a real attempt, same as a
+production batch run.
 
 The resulting submission is uploaded to Supabase as
 submissions/submission_coach_{x}.json — same bucket/folder as the real,
@@ -18,8 +21,8 @@ nothing is ever overwritten, so runs accumulate as history).
 It is then graded against ground_truth.json restricted to just the N
 email_ids actually processed — a partial run isn't penalized as "low
 coverage" for emails it was never asked to touch. All the actual grading
-math (accuracy/F1/confusion matrices/Cohen's kappa/Jaccard) and the one
-AI-recommendations LLM call are reused unmodified from the_invigilator.py.
+math (accuracy/F1/confusion matrices/Cohen's kappa/Jaccard) is reused
+unmodified from the_invigilator.py.
 
 Writes one combined Excel report card to
 stats_bundle/report_card/performance_coach_{x}.xlsx and a graph to
@@ -28,6 +31,7 @@ the uploaded submission_coach_{x}.json).
 """
 import itertools
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 STATS_BUNDLE_DIR = Path(__file__).resolve().parent
@@ -51,14 +55,36 @@ from app.llm import ask_json, client, DEFAULT_MODEL  # noqa: E402
 from app.unit_normalizer import to_kg  # noqa: E402
 
 from the_invigilator import (  # noqa: E402
-    _llm_info_line,
     _load_ground_truth,
     _pct,
     evaluate,
-    get_ai_recommendations,
     render_xlsx,
     render_graphs,
 )
+
+
+def _detect_llm_provider() -> str:
+    """Figures out which of llm.py's provider blocks is currently active by
+    inspecting the `client` object it constructed — llm.py only ever
+    uncomments one block at a time, so this stays accurate without llm.py
+    needing to declare its own provider name anywhere."""
+    module_name = type(client).__module__
+
+    if "genai" in module_name:
+        return "Google Gemini (direct)"
+
+    base_url = str(getattr(client, "base_url", ""))
+    if "openrouter.ai" in base_url:
+        return "OpenRouter"
+    if "localhost:11434" in base_url or "ollama" in base_url:
+        return "Ollama (local)"
+    if "api.openai.com" in base_url:
+        return "OpenAI (direct)"
+    return f"Unknown provider (client={module_name}, base_url={base_url or 'n/a'})"
+
+
+def _llm_info_line() -> str:
+    return f"{_detect_llm_provider()} — model: {DEFAULT_MODEL}"
 
 
 def _next_index(inbox: Inbox) -> int:
@@ -79,28 +105,47 @@ def _next_index(inbox: Inbox) -> int:
     return x
 
 
-def _run_until_stopped(inbox: Inbox, run_id: str, limit: int = None) -> dict:
-    """Processes emails one at a time, in inbox order, stopping at the
-    first of: the inbox running out, process_email() raising (typically an
-    LLM quota/rate-limit error surfacing after llm.py's own retries are
-    spent), or `limit` emails processed (if given — None means no cap).
-    Returns the submission dict built from whatever succeeded."""
-    submission = {}
+def _process_one(inbox: Inbox, email: dict, run_id: str):
+    """One email's full pipeline run, for use inside the worker pool.
+    process_email() (routes.py) already turns a pipeline-level failure into
+    an is_processing_failure result rather than raising, so the try/except
+    here is only a last-resort net for a genuinely unexpected bug — it
+    reports and skips that one email rather than aborting the whole run."""
+    try:
+        result = process_email(inbox, email)
+    except Exception as exc:
+        print(f"[!] Unexpected error on {email.get('email_id')}: {type(exc).__name__}: {exc}")
+        return None
+    submission_entry, _email_row = build_report(result, run_id)
+    return result["email_id"], submission_entry
+
+
+def _run_parallel(inbox: Inbox, run_id: str, limit: int = None, max_workers: int = 3) -> dict:
+    """Processes up to `limit` emails (or the whole inbox) concurrently —
+    max_workers=3 matches the real app's stream_batch_process() (routes.py)
+    pool size, kept conservative since each worker holds an LLM call in
+    flight against local Ollama (memory-bound, not just CPU/socket-bound —
+    see routes.py's comment on the same pool size). Returns the submission
+    dict built from every email that produced a result (a per-email failure
+    just means that email is missing from the returned dict, not that the
+    run stops)."""
     emails = inbox.emails()
     if limit is not None:
-        emails = itertools.islice(emails, limit)
+        emails = list(itertools.islice(emails, limit))
+    total = len(emails)
 
-    for email in emails:
-        try:
-            result = process_email(inbox, email)
-        except Exception as exc:
-            print(f"Stopped after {len(submission)} email(s) — {type(exc).__name__}: {exc}")
-            break
-        submission_entry, _email_row = build_report(result, run_id)
-        submission[result["email_id"]] = submission_entry
-    else:
-        reached = f"the requested {limit} email(s)" if limit is not None else "the full inbox"
-        print(f"Processed {reached} ({len(submission)} email(s)) without hitting an error.")
+    submission = {}
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_process_one, inbox, email, run_id) for email in emails]
+        for future in as_completed(futures):
+            completed += 1
+            outcome = future.result()
+            if outcome is not None:
+                email_id, submission_entry = outcome
+                submission[email_id] = submission_entry
+            print(f"[{completed}/{total}] processed ({len(submission)} succeeded so far)")
+
     return submission
 
 
@@ -116,7 +161,7 @@ def main():
     inbox = Inbox("supabase")
     x = _next_index(inbox)
 
-    submission = _run_until_stopped(inbox, run_id=f"coach_{x}", limit=limit)
+    submission = _run_parallel(inbox, run_id=f"coach_{x}", limit=limit)
     if not submission:
         print("No emails were successfully processed — nothing to submit or grade.")
         return
@@ -129,18 +174,17 @@ def main():
     ground_truth_subset = {eid: ground_truth_full[eid] for eid in submission if eid in ground_truth_full}
 
     report = evaluate(ground_truth_subset, submission)
-    recommendations = get_ai_recommendations(report, inbox)
 
     report_path = REPORT_CARD_DIR / f"performance_coach_{x}.xlsx"
     graph_path = SUMMARY_GRAPHS_DIR / f"graph_coach_{x}.png"
 
-    stop_reason = f"requested limit of {limit}" if limit is not None else "inbox exhausted or an API/quota error"
+    requested = f"a requested {limit}" if limit is not None else "the whole inbox"
     extra_summary_rows = [
-        ("Coach run", f"N={len(submission)} email(s) processed before stopping ({stop_reason})"),
+        ("Coach run", f"N={len(submission)} email(s) succeeded (of {requested})"),
         ("Graded against", f"{len(submission)} of {len(ground_truth_full)} in the answer key "
                             "(coverage below reads against this subset, not the full key)"),
     ]
-    render_xlsx(report, recommendations, report_path,
+    render_xlsx(report, report_path,
                 title="THE COACH — Pipeline Report Card", extra_summary_rows=extra_summary_rows)
     render_graphs(report, graph_path)
 

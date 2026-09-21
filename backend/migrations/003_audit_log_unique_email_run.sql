@@ -8,6 +8,14 @@
 -- distinct for uniqueness purposes, so old rows never collide with each
 -- other or with new ones. New rows going forward always carry a real
 -- run_id (routes.py now passes it through).
+--
+-- Historical note: 001_init.sql was later hand-edited to already declare
+-- `run_id` and an inline `unique (email_id, run_id)` on review_audit_log
+-- directly. On a FRESH install this migration's ADD COLUMN is a no-op
+-- (IF NOT EXISTS), but its ADD CONSTRAINT below creates a second,
+-- differently-named unique constraint alongside the one 001 already
+-- made — harmless (Postgres allows both), just redundant. Kept for
+-- projects that ran 001 before that edit and need to migrate forward.
 
 alter table review_audit_log add column if not exists run_id text references runs(run_id);
 

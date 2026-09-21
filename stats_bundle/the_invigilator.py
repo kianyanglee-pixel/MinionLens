@@ -6,15 +6,11 @@ entry by entry, against this folder's ground_truth.json. Writes one combined
 Excel report card to report_card/performance_{X}.xlsx, X auto-incrementing
 per run.
 
-"LLM over LLM": every metric, confusion matrix, and mistake list is computed
-with plain deterministic code — no AI involved, same inputs always give the
-same numbers. The one deliberate exception is the final AI RECOMMENDATIONS
-section, which calls our own llm.py's ask_json() to have the active LLM
-provider critique the pipeline's own mistakes and suggest fixes. Nowhere
-else in this file calls an LLM.
+Every metric, confusion matrix, and mistake list is computed with plain
+deterministic code — no AI involved anywhere, same inputs always give the
+same numbers.
 """
 import json
-from collections import Counter
 from datetime import datetime, timezone
 import subprocess
 import sys
@@ -38,7 +34,6 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(BACKEND_DIR / ".env")
 
 from loader import Inbox  # noqa: E402
-from app.llm import ask_json, client, DEFAULT_MODEL  # noqa: E402
 from app import db  # noqa: E402
 from app.classifier import classify_email  # noqa: E402
 from app.evaluator import compare_documents  # noqa: E402
@@ -46,30 +41,6 @@ from app.extractor import extract_field_pair, extract_fields  # noqa: E402
 from app.unit_normalizer import to_kg  # noqa: E402
 
 SUBMISSION_PATH = "submissions/submission.json"
-
-
-def _detect_llm_provider() -> str:
-    """Figures out which of llm.py's provider blocks is currently active by
-    inspecting the `client` object it constructed — llm.py only ever
-    uncomments one block at a time, so this stays accurate without llm.py
-    needing to declare its own provider name anywhere."""
-    module_name = type(client).__module__
-
-    if "genai" in module_name:
-        return "Google Gemini (direct)"
-
-    base_url = str(getattr(client, "base_url", ""))
-    if "openrouter.ai" in base_url:
-        return "OpenRouter"
-    if "localhost:11434" in base_url or "ollama" in base_url:
-        return "Ollama (local)"
-    if "api.openai.com" in base_url:
-        return "OpenAI (direct)"
-    return f"Unknown provider (client={module_name}, base_url={base_url or 'n/a'})"
-
-
-def _llm_info_line() -> str:
-    return f"{_detect_llm_provider()} — model: {DEFAULT_MODEL}"
 
 
 def _git_username() -> str:
@@ -368,168 +339,6 @@ def _subset_row(subset: dict, noun: str) -> tuple:
     ])
 
 
-# -- AI recommendations (the one deliberate exception to "no LLM calls") -----
-
-RECOMMENDATIONS_SYSTEM_PROMPT = """You are reviewing a mechanical grading report for a freight-forwarding email
-pipeline with three LLM-driven stages: classifier.py (picks an email's category), extractor.py (pulls fields off
-a Shipping Instruction / Bill of Lading), and evaluator.py (compares the two extractions and also runs an LLM
-"grounding verifier" to confirm a value is attributable to its source text). You'll be given (1) a summary of
-where its predictions diverged from the correct answers on a real batch of graded emails — accuracy/F1 per field,
-confusion matrices, the worst-performing labels/fields, the most common misclassification patterns — and (2) the
-real email and SI/BL attachment content behind a handful of emails it got wrong, so you can see exactly what
-those documents actually said.
-
-Suggest concrete, specific next steps to improve accuracy, split into three groups:
-- "harness_changes": deterministic, non-LLM logic changes in evaluator.py (e.g. fuzzy-match thresholds, the
-  grounding/literal-match logic, weight tolerance) that could fix a pattern of errors without touching any prompt.
-- "prompt_changes": specific wording changes to the system prompts in classifier.py, evaluator.py's grounding
-  verifier, or extractor.py.
-- "general_advice": anything worth flagging that doesn't fit either bucket above — e.g. the active LLM/model
-  itself may be a poor fit for this task (too small, weak JSON-mode support, weak instruction-following for its
-  size), a pattern that looks like noisy or ambiguous ground truth rather than a pipeline bug, a stage that may
-  need a different approach entirely rather than a prompt tweak, or a systemic issue spanning multiple stages.
-
-Every suggestion must reference the actual pattern in the data given to you — and, where relevant, what the
-real document text actually said — not generic advice. Respond with strict JSON:
-{"harness_changes": [{"file": "<filename>", "change": "<specific change>", "why": "<pattern that motivates it>"}],
-"prompt_changes": [{"file": "<filename>", "change": "<specific change>", "why": "<pattern that motivates it>"}],
-"general_advice": [{"observation": "<specific observation or suggestion>", "why": "<pattern that motivates it>"}]}"""
-
-
-def _pick_evidence_email_ids(report: dict, limit: int = 6) -> list:
-    """A small, representative sample of mistaken email_ids across fields —
-    not all 500+ — to fetch real documents for."""
-    ids = []
-
-    def add_from(errors, n):
-        for err in errors[:n]:
-            if err["email_id"] not in ids:
-                ids.append(err["email_id"])
-
-    add_from(report["category"]["errors"], 2)
-    add_from(report["status"]["errors"], 2)
-    add_from(report["defect_fields"]["errors"], 1)
-    add_from(report["has_defect"]["errors"], 1)
-    return ids[:limit]
-
-
-def _gather_evidence(inbox: Inbox, email_ids: list) -> list:
-    """Pulls the real email + SI/BL attachment text for a handful of
-    mistaken emails straight from the emails_and_attachment Supabase bucket
-    (same bucket/methods the pipeline itself uses), so the AI recommendation
-    is grounded in actual documents, not just labels."""
-    evidence = []
-    for email_id in email_ids:
-        try:
-            email = inbox.get(email_id)
-        except Exception:
-            continue
-
-        attachments = {}
-        for att_path in email.get("attachments", []):
-            try:
-                text = inbox.read_text(att_path)
-            except Exception:
-                continue
-            attachments[att_path.rsplit("/", 1)[-1]] = text[:1500]  # capped, keeps the LLM call small
-
-        evidence.append({
-            "email_id": email_id,
-            "subject": email.get("subject"),
-            "body": (email.get("body") or "")[:1000],
-            "attachments": attachments,
-        })
-    return evidence
-
-
-def _top_confusions(errors: list, limit: int = 5) -> list:
-    counts = Counter((e["true"], e["predicted"]) for e in errors)
-    return [{"true": t, "predicted": p, "count": c} for (t, p), c in counts.most_common(limit)]
-
-
-def _worst_entries(stats_by_key: dict, limit: int = 5) -> list:
-    """Lowest-F1 (or lowest precision+recall, for defect_fields) entries first."""
-    def score(stats):
-        return stats.get("f1", stats.get("precision", 0) + stats.get("recall", 0))
-
-    ranked = sorted(stats_by_key.items(), key=lambda kv: score(kv[1]))
-    return [{"label": label, **stats} for label, stats in ranked[:limit]]
-
-
-def _build_llm_summary(report: dict) -> dict:
-    """Condenses the full report into worst-offenders + top patterns, instead
-    of dumping every raw mistake — keeps the LLM call cheap and focused."""
-    def multinomial_summary(section):
-        return {
-            "accuracy": section["accuracy"],
-            "macro_f1": section["macro_f1"],
-            "worst_labels": _worst_entries(section["per_class"]),
-            "most_common_confusions": _top_confusions(section["errors"]),
-        }
-
-    return {
-        "category": multinomial_summary(report["category"]),
-        "status": multinomial_summary(report["status"]),
-        "review_reason": multinomial_summary(report["review_reason"]),
-        "has_defect": {
-            "accuracy": report["has_defect"]["accuracy"],
-            "precision": report["has_defect"]["precision"],
-            "recall": report["has_defect"]["recall"],
-            "f1": report["has_defect"]["f1"],
-            "cohens_kappa": report["has_defect"]["cohens_kappa"],
-            "confusion_matrix": report["has_defect"]["confusion_matrix"],
-        },
-        "defect_fields": {
-            "exact_match_accuracy": report["defect_fields"]["exact_match_accuracy"],
-            "mean_jaccard_similarity": report["defect_fields"]["mean_jaccard_similarity"],
-            "worst_fields": _worst_entries(report["defect_fields"]["per_field"]),
-        },
-        "overall": {
-            "row_exact_match_rate": report["rollups"]["row_exact_match_rate"],
-            "processing_failure_rate": report["rollups"]["processing_failure_rate"],
-            "coverage": report["rollups"]["coverage"],
-        },
-    }
-
-
-def get_ai_recommendations(report: dict, inbox: Inbox) -> dict:
-    """The one place in this file that calls an LLM — deliberately, to have
-    the active provider critique its own pipeline's mistakes, backed by the
-    real documents (also fetched live from Supabase, not a local copy)
-    behind a sample of those mistakes. Never raises: a failed/unparsable
-    call just becomes an "error" the report renders."""
-    summary = _build_llm_summary(report)
-    evidence = _gather_evidence(inbox, _pick_evidence_email_ids(report))
-
-    user_prompt = (
-        "Today's evaluation summary:\n\n" + json.dumps(summary, indent=2)
-        + "\n\nReal documents behind a few representative mistakes:\n\n"
-        + json.dumps(evidence, indent=2)
-    )
-
-    try:
-        result = ask_json(RECOMMENDATIONS_SYSTEM_PROMPT, user_prompt)
-    except Exception as exc:
-        return {"error": f"LLM call failed: {exc}"}
-
-    if not isinstance(result, dict) or result.get("error") == "invalid_json":
-        return {"error": "LLM response could not be parsed as JSON"}
-
-    harness_changes = result.get("harness_changes")
-    prompt_changes = result.get("prompt_changes")
-    general_advice = result.get("general_advice")
-    return {
-        "harness_changes": harness_changes if isinstance(harness_changes, list) else [],
-        "prompt_changes": prompt_changes if isinstance(prompt_changes, list) else [],
-        "general_advice": general_advice if isinstance(general_advice, list) else [],
-        # Kept only so the report can show it verbatim when all three lists
-        # above end up empty — lets you see whether the model genuinely had
-        # nothing to say, or said something in the wrong shape that got
-        # silently dropped by the isinstance checks above.
-        "raw_response": result,
-    }
-
-
 # -- visual dashboard (deterministic — same evaluate() results, no AI) -------
 
 def _plot_accuracy_bar(ax, report: dict) -> None:
@@ -760,45 +569,6 @@ def _mistakes_rows(report: dict) -> list:
     return rows
 
 
-def _recommendations_rows(recommendations: dict) -> list:
-    rows = [
-        _row("section", "AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying."),
-        _blank(),
-    ]
-    if recommendations.get("error"):
-        rows.append(_row("data", "Could not generate recommendations", recommendations["error"]))
-        return rows
-
-    def items_group(title: str, items: list, item_key: str):
-        rows.append(_row("desc", title))
-        if items:
-            rows.append(_row("subhead", "File", "Change", "Why") if item_key == "change" else _row("subhead", "Observation", "Why"))
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                if item_key == "change":
-                    rows.append(_row("data", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
-                else:
-                    rows.append(_row("data", item.get("observation", ""), item.get("why", "")))
-        else:
-            rows.append(_row("note", "(none suggested)"))
-        rows.append(_blank())
-
-    items_group("Hardcoded harness changes to consider (evaluator.py logic, no prompt involved)",
-                recommendations["harness_changes"], "change")
-    items_group("Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py)",
-                recommendations["prompt_changes"], "change")
-    items_group("General advice (model choice, data quality, or anything else outside harness/prompt tweaks)",
-                recommendations["general_advice"], "observation")
-
-    if not recommendations["harness_changes"] and not recommendations["prompt_changes"] and not recommendations["general_advice"]:
-        rows.append(_row("note", "All three lists above came back empty — raw LLM response, for debugging:"))
-        rows.append(_row("data", json.dumps(recommendations.get("raw_response"))))
-        rows.append(_blank())
-
-    return rows
-
-
 def _write_xlsx(path: Path, rows: list) -> None:
     """Writes one worksheet, top to bottom, applying a style per row (bold
     section banners, bold column headers, wrapped long text) so the report
@@ -836,18 +606,17 @@ def _write_xlsx(path: Path, rows: list) -> None:
     wb.save(path)
 
 
-def render_xlsx(report: dict, recommendations: dict, output_path: Path,
+def render_xlsx(report: dict, output_path: Path,
                  title: str = "THE INVIGILATOR — Pipeline Report Card", extra_summary_rows: list = None) -> None:
     """Writes the whole report card — header, per-field stats, overall
-    summary, grouped mistakes, and AI recommendations — as ONE combined
-    Excel workbook (stacked sections on a single sheet, not many small
-    files), formatted so nothing needs manual column resizing to read."""
+    summary, and grouped mistakes — as ONE combined Excel workbook (stacked
+    sections on a single sheet, not many small files), formatted so nothing
+    needs manual column resizing to read."""
     rollups = report["rollups"]
     rows = [
         _row("title", title),
         _row("data", "Run by", _git_username()),
         _row("data", "Evaluated at", report["evaluated_at"]),
-        _row("data", "AI recommendations powered by", _llm_info_line()),
         _blank(),
     ]
     if extra_summary_rows:
@@ -904,24 +673,21 @@ def render_xlsx(report: dict, recommendations: dict, output_path: Path,
     ]
 
     rows += _mistakes_rows(report)
-    rows += _recommendations_rows(recommendations)
 
     _write_xlsx(output_path, rows)
 
 
 def main():
-    print(f"Active LLM: {_llm_info_line()}")
     ground_truth = _load_ground_truth()
     inbox = Inbox("supabase")
     submission = _load_submission(inbox)
     report = evaluate(ground_truth, submission)
-    recommendations = get_ai_recommendations(report, inbox)
 
     x = _next_index()
     report_path = REPORT_CARD_DIR / f"performance_{x}.xlsx"
     graph_path = SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg"
 
-    render_xlsx(report, recommendations, report_path)
+    render_xlsx(report, report_path)
     render_graphs(report, graph_path)
 
     print(f"Wrote {report_path}")

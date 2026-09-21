@@ -18,7 +18,12 @@ def build_report(result: dict, run_id: str) -> tuple:
     processing_failure = result.get("processing_failure", False)
 
     if comparison is None:
-        status = "OK"
+        # comparison is None either because this category never goes
+        # through document comparison (a genuine OK), or because
+        # classify_email() itself failed (processing_failure=True) — those
+        # two cases must not be reported the same way, or a real failure
+        # silently looks like a clean OK in the graded submission.
+        status = "NEEDS_REVIEW" if processing_failure else "OK"
         review_reason = None
         has_defect = False
         defect_fields = []
@@ -43,6 +48,13 @@ def build_report(result: dict, run_id: str) -> tuple:
         "defect_fields": defect_fields,
     }
 
+    # `email_row` below is currently unused — the_coach.py (the only caller)
+    # discards it (`_email_row`) and only persists `submission_entry`. Its
+    # `email_id` is the bare id, unlike routes.py's own
+    # `_process_and_save_worker`, which builds a run-scoped
+    # f"{run_id}_{email_name}" id before writing to the emails table — if
+    # this row is ever wired up to a real DB write, match that scheme
+    # (and run review_reason through db.sanitize_review_reason()) first.
     email_row = {
         "email_id": result["email_id"],
         "category": result["category"],

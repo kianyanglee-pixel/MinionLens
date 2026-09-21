@@ -18,6 +18,9 @@ dist/
 dist-ssr/
 *.local
 
+# Claude Code local session state (keep .claude/launch.json)
+.claude/*.lock
+
 # Editor / OS
 .vscode/
 .idea/

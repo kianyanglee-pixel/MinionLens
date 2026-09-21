@@ -45,6 +45,9 @@ export interface AuditLog {
 export interface EmailRecord {
   email_id: string;
   email_name: string;
+  // Needed to scope a resolve action to this run — email_id alone is only
+  // unique within a run (bare id, no run_id prefix), not across runs.
+  run_id: string;
   category: string;
   automated_status: string;
   automated_review_reason?: string;
@@ -52,7 +55,20 @@ export interface EmailRecord {
   current_review_reason?: string;
   has_defect: boolean;
   defect_fields: string[];
+  awaiting_sender_response: boolean;
+  is_processing_failure: boolean;
   processed_at: string;
   trace: EmailTrace;
-  review_audit_log?: AuditLog[];
+  // PostgREST returns this as a single object (not an array!) when the
+  // relationship resolves to at most one row — which it always does here,
+  // since review_audit_log has a unique(email_id, run_id) constraint — or
+  // null when there's no escalation at all. Never an array in practice.
+  review_audit_log?: AuditLog | null;
+}
+
+export interface OriginalEmail {
+  sender: string;
+  subject: string;
+  body: string;
+  attachments: string[];
 }

@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 import json
@@ -35,6 +36,50 @@ bp = Blueprint("api", __name__)
 
 DOC_COMPARISON_CATEGORY = "BL_COMPARISON"
 
+
+def _db_source_path(run_id: str) -> Path:
+    return BASE_DATA_DIR / run_id / "db_source.json"
+
+
+def _save_custom_db_source(run_id: str, url: str, key: str) -> None:
+    """Persists the non-default Supabase project a "database"-source run
+    was pointed at, so later requests for this same run_id (stream-process,
+    the source drawer, the original-email route) reconnect to the same
+    project instead of silently falling back to the server's own default
+    SUPABASE_URL/KEY. Lives next to where a local-folder ingest would keep
+    its files — this run just has a one-file "folder" instead."""
+    path = _db_source_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"url": url, "key": key}))
+
+
+def _load_custom_db_source(run_id: str) -> dict | None:
+    path = _db_source_path(run_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _resolve_inbox_for_run(run_id: str | None) -> Inbox:
+    """Local/Cloud/Drive ingests each get an isolated batch folder under
+    BASE_DATA_DIR; a "database"-source run deliberately skips that and is
+    read straight from a Supabase project instead — either a custom one the
+    user pointed it at (see ingest_batch()), or the server's own default.
+    Keeps every run-scoped route (source drawer, original email,
+    stream-process) consistently pointed at the same data for a given run."""
+    if run_id:
+        custom_source = _load_custom_db_source(run_id)
+        if custom_source:
+            return Inbox("supabase", url=custom_source.get("url"), key=custom_source.get("key"))
+
+        batch_inbox_dir = BASE_DATA_DIR / run_id / "inbox"
+        if batch_inbox_dir.exists() and any(batch_inbox_dir.glob("*.json")):
+            return Inbox(str(BASE_DATA_DIR / run_id))
+    return Inbox("supabase")
+
 def _attachment_role(att_path):
     name = att_path.rsplit("/", 1)[-1].upper()
     if "_SI" in name:
@@ -46,7 +91,7 @@ def _attachment_role(att_path):
 def _missing_attachment_result(missing_role, si_path=None, bl_path=None):
     return {
         "status": "NEEDS_REVIEW",
-        "review_reason": "missing_value",
+        "review_reason": "missing_attachment",
         "processing_failure": False,
         "has_defect": False,
         "defect_fields": [],
@@ -55,9 +100,38 @@ def _missing_attachment_result(missing_role, si_path=None, bl_path=None):
         "bl_path": bl_path,
     }
 
+def _processing_failure_result():
+    """Same shape compare_documents() already returns for an extractor-level
+    invalid_json response (evaluator.py) — reused here for the other failure
+    mode: an LLM call that raised (exhausted retries / network error) instead
+    of returning a parseable-but-wrong response. Distinct from a content
+    problem, per §2.4-F: no document to view, no judgment to make."""
+    return {
+        "status": "NEEDS_REVIEW",
+        "review_reason": None,
+        "processing_failure": True,
+        "has_defect": False,
+        "defect_fields": [],
+        "field_comparisons": {},
+    }
+
 def process_email(inbox, email):
-    classification = classify_email(email)
-    category = classification.get("category", "GENERAL")
+    try:
+        classification = classify_email(email)
+    except Exception as exc:
+        return {
+            "email_id": email.get("email_id"),
+            "category": None,
+            "classification": {"category": None, "reason": str(exc), "processing_failure": True},
+            "comparison": None,
+            "processing_failure": True,
+        }
+
+    # `or "GENERAL"`, not `.get(..., "GENERAL")` — classify_email() sets
+    # category to an explicit None on a processing failure (invalid_json),
+    # which .get()'s default doesn't catch, and this category value flows
+    # straight into submission.json (report.py) where it must never be null.
+    category = classification.get("category") or "GENERAL"
 
     if category != DOC_COMPARISON_CATEGORY:
         return {
@@ -75,11 +149,23 @@ def process_email(inbox, email):
     if not si_path or not bl_path:
         comparison = _missing_attachment_result("SI" if not si_path else "BL", si_path, bl_path)
     else:
-        # Use teammate's optimized single-prompt pair extractor
-        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
-        comparison = compare_documents(si_result, bl_result)
-        comparison["si_path"] = si_path
-        comparison["bl_path"] = bl_path
+        try:
+            # Use teammate's optimized single-prompt pair extractor
+            si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
+            comparison = compare_documents(si_result, bl_result)
+            comparison["si_path"] = si_path
+            comparison["bl_path"] = bl_path
+        except Exception:
+            # An ask_json() call raised (retries exhausted, network error) —
+            # a system fault, not a content problem. Without this, the
+            # exception would only be caught far away in stream_batch_
+            # process()'s future.result() loop, which just logs a message
+            # and never calls save_single_processed_email() — the email
+            # would silently vanish from the run instead of showing up as
+            # a processing failure (PRD §4.11).
+            comparison = _processing_failure_result()
+            comparison["si_path"] = si_path
+            comparison["bl_path"] = bl_path
 
     return {
         "email_id": email.get("email_id"),
@@ -89,13 +175,23 @@ def process_email(inbox, email):
         "processing_failure": classification.get("processing_failure", False) or (comparison.get("processing_failure", False) if comparison else False)
     }
 
-def _process_and_save_worker(inbox, email_data, run_id: str):
+def _process_and_save_worker(inbox, email_data, run_id: str, dedup_suffix: str = ""):
     raw_id = str(email_data.get("email_id") or "email_unknown")
-    email_name = raw_id.replace(".json", "")
-    email_id = f"{run_id}_{email_name}"
+    email_name = raw_id.replace(".json", "") + dedup_suffix
+    # Bare id, not run_id-prefixed — the emails table's real key is the
+    # composite (email_id, run_id) (migrations/002_composite_key.sql), so a
+    # run_id prefix here was always redundant for uniqueness. Every query
+    # that resolves a specific row (resolve_review_item, and the fallback
+    # branch in save_single_processed_email) must filter by BOTH columns
+    # now that the same bare email_id can legitimately appear in many runs.
+    email_id = email_name
 
     result = process_email(inbox, email_data)
-    category = result.get("category", "GENERAL")
+    # `or "GENERAL"`, not `.get(..., "GENERAL")` — a processing failure
+    # (classify_email raised, or returned invalid_json) sets category to an
+    # explicit None, which .get()'s default wouldn't catch, and `category`
+    # is NOT NULL in the DB schema (migrations/001_init.sql:22-23).
+    category = result.get("category") or "GENERAL"
     classification = result.get("classification", {})
     comparison = result.get("comparison")
     is_processing_failure = result.get("processing_failure", False)
@@ -132,7 +228,13 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
             }
         }
     else:
-        automated_status = "OK"
+        # comparison is None either because this category never goes
+        # through document comparison (a genuine OK), or because
+        # classify_email() itself failed (is_processing_failure=True) —
+        # those two cases must not be reported the same way.
+        automated_status = "NEEDS_REVIEW" if is_processing_failure else "OK"
+        if automated_status == "NEEDS_REVIEW":
+            is_needs_review = True
         automated_review = None
         has_defect = False
         defect_fields = []
@@ -157,20 +259,34 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
         "current_review_reason": automated_review,
         "has_defect": has_defect,
         "defect_fields": defect_fields,
-        "awaiting_sender_response": (has_defect or automated_status == "NEEDS_REVIEW"),
+        # Reviewer-set only (§2.4-F) — never auto-derived from the
+        # automated result. Was previously auto-set to true for every
+        # escalated/defect email at processing time, which meant the flag
+        # no longer meant anything by the time a human actually looked at
+        # the case.
+        "awaiting_sender_response": False,
         "is_processing_failure": is_processing_failure,
         "run_id": run_id,
         "processed_at": now,
         "trace": trace_payload
     }
 
+    # A processing failure never enters the Human Review Queue (§2.4-F) — no
+    # document to view, no judgment to make — so it gets no placeholder
+    # audit row at all, unlike a real content escalation.
     audit_row = None
-    if has_defect or automated_status == "NEEDS_REVIEW":
+    if not is_processing_failure and (has_defect or automated_status == "NEEDS_REVIEW"):
         audit_row = {
             "run_id": run_id,
             "email_id": email_id,
             "escalated_at": now,
-            "review_reason": automated_review or "missing_value",
+            # Placeholder row, action-updated later by resolve_review_item()
+            # once a reviewer actually acts on it (the unique(email_id,
+            # run_id) constraint means this same row is updated, not a new
+            # one inserted). review_reason is only meaningful for a
+            # NEEDS_REVIEW case; a MISMATCH escalation's real detail lives
+            # in defect_fields, not a fabricated review_reason.
+            "review_reason": automated_review,
             "automated_result": automated_status,
             "action": "awaiting_sender_response",  # Pass CHECK constraint
             "defect_fields": defect_fields,
@@ -186,6 +302,17 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
         "is_clear": is_clear,
         "is_spam": is_spam
     }
+
+# ==========================================
+# Config Route (lets the "Database" ingest tab pre-fill the default
+# connection — the URL alone isn't a secret, the key is never returned)
+# ==========================================
+@bp.route("/config", methods=["GET"])
+def get_config():
+    return jsonify({
+        "status": "success",
+        "default_supabase_url": os.getenv("SUPABASE_URL", ""),
+    })
 
 # ==========================================
 # Ingestion Route (Batch-Isolated Folders)
@@ -236,6 +363,44 @@ def ingest_batch():
     inbox_uri = data.get("inbox_uri", "") or request.form.get("inbox_uri", "")
     attachments_uri = data.get("attachments_uri", "") or request.form.get("attachments_uri", "")
 
+    # 3a. "Database" source — process the dataset already sitting in a
+    # Supabase project's storage directly, no upload/download/local copy at
+    # all. `supabase_url`/`supabase_key` optionally point this at ANY
+    # Supabase project, not just the server's own default — left blank (or
+    # omitted), it connects to whichever project SUPABASE_URL/SUPABASE_KEY
+    # in .env already point at. Deliberately does NOT create a local batch
+    # folder (get_batch_dirs) — its absence is exactly what tells
+    # stream_batch_process() and the other run-scoped routes to read
+    # straight from Supabase instead (see _resolve_inbox_for_run()).
+    if source_type == "database":
+        custom_url = (data.get("supabase_url") or "").strip() or None
+        custom_key = (data.get("supabase_key") or "").strip() or None
+
+        # The frontend always pre-fills the URL field with the server's own
+        # default (via GET /config), so submitting it unchanged shouldn't
+        # count as an override — only a genuinely different project needs
+        # its own persisted connection.
+        if custom_url and custom_url == os.getenv("SUPABASE_URL"):
+            custom_url = None
+
+        try:
+            inbox = Inbox("supabase", url=custom_url, key=custom_key)
+            in_count = sum(1 for f in inbox._supabase_list("inbox") if f["name"].startswith("email_"))
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"Could not connect to that database: {e}"}), 400
+
+        run_id = init_run_record(started_at=started_at, email_count=in_count)
+        if custom_url or custom_key:
+            _save_custom_db_source(run_id, custom_url, custom_key)
+
+        return jsonify({
+            "status": "success",
+            "run_id": run_id,
+            "inbox_count": in_count,
+            "attachment_count": None,
+            "started_at": started_at
+        })
+
     if source_type in ("cloud", "drive"):
         run_id = init_run_record(started_at=started_at, email_count=0)
         batch_root, inbox_dir, attachments_dir = get_batch_dirs(run_id)
@@ -283,14 +448,32 @@ def get_attachment_content():
         return jsonify({"status": "error", "message": "path is required"}), 400
 
     try:
-        if run_id:
-            batch_path = BASE_DATA_DIR / run_id
-            inbox = Inbox(str(batch_path))
-        else:
-            inbox = Inbox("supabase")
-
+        inbox = _resolve_inbox_for_run(run_id)
         content = inbox.read_text(path)
         return jsonify({"status": "success", "content": content})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+
+# ==========================================
+# Original Email Route (source-evidence drawer, PRD §4.8 item 4)
+# ==========================================
+@bp.route("/emails/<email_name>/original", methods=["GET"])
+def get_original_email(email_name):
+    """The source drawer needs the *originating email* (sender/subject/
+    body), not just its attachments — reads straight from the Inbox by the
+    same email_name the emails table already stores, no schema change
+    needed."""
+    run_id = request.args.get("run_id")
+    try:
+        inbox = _resolve_inbox_for_run(run_id)
+        email = inbox.get(email_name)
+        return jsonify({
+            "status": "success",
+            "sender": email.get("from", ""),
+            "subject": email.get("subject", ""),
+            "body": email.get("body", ""),
+            "attachments": email.get("attachments", []),
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 404
 
@@ -303,10 +486,8 @@ def stream_batch_process():
     if not run_id:
         return {"status": "error", "message": "run_id is required"}, 400
 
-    batch_path = (BASE_DATA_DIR / run_id).resolve()
-
     def generate_events():
-        inbox = Inbox(batch_path)
+        inbox = _resolve_inbox_for_run(run_id)
         emails = inbox.emails()
         total_emails = len(emails)
 
@@ -320,11 +501,33 @@ def stream_batch_process():
         }
         completed_count = 0
 
-        # Max 3 workers to prevent socket timeouts on Windows
+        # A duplicate email_id in the dataset must not silently overwrite an
+        # earlier record via the upsert in save_single_processed_email()
+        # (PRD §4.11) — give every repeat after the first a disambiguating
+        # suffix so each still gets its own row, and say so out loud.
+        seen_ids = {}
+        dedup_suffixes = []
+        for email in emails:
+            raw_id = str(email.get("email_id") or "email_unknown")
+            seen_ids[raw_id] = seen_ids.get(raw_id, 0) + 1
+            dedup_suffixes.append(f"__dup{seen_ids[raw_id]}" if seen_ids[raw_id] > 1 else "")
+        duplicate_ids = sorted({eid for eid, count in seen_ids.items() if count > 1})
+        if duplicate_ids:
+            yield f"data: {json.dumps({'stage': 'WARNING', 'message': f'Duplicate email_id(s) in this batch, kept as separate records: {duplicate_ids}', 'current': 0, 'total': total_emails})}\n\n"
+
+        # Kept at 3, not raised — a higher count here (tried 6) got the
+        # backend OOM-killed on real hardware while Ollama (a local model,
+        # multi-GB resident in memory) was the active provider in llm.py.
+        # The active provider is Gemini (cloud API) now, which doesn't have
+        # that specific memory constraint, but this is left conservative
+        # since Gemini has its own per-project rate limits (llm.py's retry
+        # handles a 429 gracefully, but a much higher worker count would
+        # just mean more of them). If you switch llm.py back to Ollama,
+        # keep this at 3 or lower — see README's OLLAMA_NUM_PARALLEL note.
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
-                executor.submit(_process_and_save_worker, inbox, email, run_id): email
-                for email in emails
+                executor.submit(_process_and_save_worker, inbox, email, run_id, dedup_suffixes[i]): email
+                for i, email in enumerate(emails)
             }
 
             for future in as_completed(futures):
@@ -395,13 +598,33 @@ def get_reviews():
 
 @bp.route("/reviews/<email_id>/resolve", methods=["POST"])
 def resolve_email_review(email_id):
+    # Matches PRD §4.9's contract exactly: {decision?, defect_fields?, notes,
+    # awaiting_sender_response?} — one action covers both outcomes (§2.4-F).
     body = request.get_json() or {}
-    decision = body.get("decision", "APPROVED")
-    resolved_by = body.get("resolved_by", "Operator")
+    decision = body.get("decision")
+    defect_fields = body.get("defect_fields")
     notes = body.get("notes", "")
+    awaiting_sender_response = bool(body.get("awaiting_sender_response", False))
+    resolved_by = body.get("resolved_by", "Operator")
+    # Required now that email_id is the bare id (no run_id prefix) — the
+    # same email_id can exist in multiple runs, so without this the update
+    # would hit every run's row for that email_id, not just this one.
+    run_id = body.get("run_id")
+    if not run_id:
+        return jsonify({"status": "error", "message": "run_id is required"}), 400
 
     try:
-        result = resolve_review_item(email_id=email_id, decision=decision, resolved_by=resolved_by, notes=notes)
+        result = resolve_review_item(
+            email_id=email_id,
+            run_id=run_id,
+            decision=decision,
+            defect_fields=defect_fields,
+            notes=notes,
+            awaiting_sender_response=awaiting_sender_response,
+            resolved_by=resolved_by,
+        )
         return jsonify(result)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

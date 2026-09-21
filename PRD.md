@@ -1,8 +1,8 @@
-# Minion Ship — Shipping Document Verification PRD
+# Minion Lens — Shipping Document Verification PRD
 
 ## TL;DR
 
-We're building **Minion Ship**: an AI-assisted pipeline that reads a shared shipping-ops inbox, works out which emails are document-comparison requests, checks the attached **Shipping Instruction (SI)** against the draft **Bill of Lading (BL)** across 7 required fields, and reports exactly what matches, what doesn't, and what it isn't sure about — instead of a human reading every email and eyeballing two documents side by side.
+We're building **Minion Lens**: an AI-assisted pipeline that reads a shared shipping-ops inbox, works out which emails are document-comparison requests, checks the attached **Shipping Instruction (SI)** against the draft **Bill of Lading (BL)** across 7 required fields, and reports exactly what matches, what doesn't, and what it isn't sure about — instead of a human reading every email and eyeballing two documents side by side.
 
 ---
 
@@ -24,7 +24,7 @@ A shipping-ops team runs one shared inbox that mixes together document-checking 
 
 ## 2. The Solution
 
-**Minion Ship** turns the inbox into a **pipeline** — a fixed sequence of processing stages, not an autonomous agent looping on its own decisions (see the terminology note in §2.2). Every email goes in one end, and a clear, structured result comes out the other end. Nobody has to read every email by hand to know what needs attention. Full technical detail is in **Architecture**; this section is the shape of the idea and the vocabulary we'll all use for it.
+**Minion Lens** turns the inbox into a **pipeline** — a fixed sequence of processing stages, not an autonomous agent looping on its own decisions (see the terminology note in §2.2). Every email goes in one end, and a clear, structured result comes out the other end. Nobody has to read every email by hand to know what needs attention. Full technical detail is in **Architecture**; this section is the shape of the idea and the vocabulary we'll all use for it.
 
 **In one analogy:** think of it as a small shipping office adding one new hire and one strict process, instead of asking the existing staff to read every letter and cross-check every document by hand.
 
@@ -96,7 +96,7 @@ This is cheaper than running the LLM verifier on everything, and it narrows what
 
 ## 3. Key Features
 
-What differentiates Minion Ship from "an LLM prompt that reads two documents": for every feature below, we can say whether it's an LLM call or plain code, and why — most competing teams under hackathon time pressure will have one mega-prompt doing everything, with no answer to "what happens when it's confidently wrong."
+What differentiates Minion Lens from "an LLM prompt that reads two documents": for every feature below, we can say whether it's an LLM call or plain code, and why — most competing teams under hackathon time pressure will have one mega-prompt doing everything, with no answer to "what happens when it's confidently wrong."
 
 1. **Meaning-based field matching, not label matching.** We map `Port of Loading` and `Load Port` to the same canonical field on purpose, using the extraction LLM's language understanding. Worth being honest that this alone isn't a differentiator — any team using an LLM for extraction gets synonym-handling for free. What's differentiated is *knowing that*, and putting the LLM only where it earns its keep (extraction, classification, grounding verification) while keeping everything else deterministic — see the architecture framing below.
 2. **A deterministic core where it counts.** Classification routing and the actual 7-field diff are plain code, not model calls. Comparing two numbers doesn't need a language model, and a diff that can silently hallucinate is worse than no diff. This also makes the comparison step 100% reproducible — same inputs, same output, every run, which matters for judges checking *Technical Feasibility & Validation*.
@@ -114,33 +114,41 @@ What differentiates Minion Ship from "an LLM prompt that reads two documents": f
 
 ### 4.1 Current state — what's actually built today
 
-Worth being honest about this before showing the target: as of this doc, the pipeline in §4.2 is a design, not running code. Here's what actually exists in the repo right now.
+This section used to describe an empty scaffold (the pipeline in §4.2 as a target, not running code). It doesn't anymore — the pipeline is built and has been run end-to-end against real data, not just described. Here's what's actually in the repo right now.
 
 ```mermaid
 flowchart TD
-  UI["Dashboard UI\nfrontend/src/pages/Dashboard.tsx\nfully designed, but running on\nHARDCODED mock data (INITIAL_RECORDS)"]
-  Upload["FileUpload.tsx\ncomponent exists, unwired"]
-  API["Flask app\nbackend/app/routes.py\n1 comment + 1 import, no endpoints"]
-  CLS["classifier.py\nimports Inbox, no logic"]
-  EXT["extractor.py\nEMPTY FILE"]
-  EVAL["evaluator.py\nEMPTY FILE"]
-  LLMC["llm.py\nOpenAI client constructed,\nnever called anywhere"]
-  LOADER["loader.py\nInbox class — provided by organizers,\nnot yet used by our backend"]
+  UI["Dashboard UI\nfrontend/src/pages/Dashboard.tsx\nreal fetch calls, no mock data:\nGET /api/runs, /api/runs/:id,\n/api/stream-process (SSE)"]
+  Upload["FileUpload.tsx\n4 real ingest sources:\nLocal / Database / Cloud / Drive"]
+  API["Flask app\nbackend/app/routes.py\n10 real endpoints under /api"]
+  CLS["classifier.py\nLLM call, structured JSON,\n5-category classification"]
+  EXT["extractor.py\nLLM call, combined SI+BL\nextraction, .txt/.pdf/.docx/.xlsx"]
+  EVAL["evaluator.py\nComparator + Confidence Gate,\nLiteral Match Check + Grounding\nVerifier, Unit Normalizer"]
+  LLMC["llm.py\n4-provider switcher\n(Gemini active; OpenRouter/\nOpenAI/Ollama one-line swap)"]
+  LOADER["loader.py\nInbox class — wired into\nroutes.py and stats_bundle/,\nthread-safe concurrent downloads"]
+  DB[("Supabase Postgres + Storage\nemails / runs / review_audit_log")]
+  REVIEW["Human review screen\nresolve form, source drawer,\naudit log, status banners"]
 
-  UI -.->|no live API calls| API
-  Upload -.->|not connected| API
-  API -.->|no route defined| CLS
-  API -.->|no route defined| EXT
-  API -.->|no route defined| EVAL
-  CLS -.->|not called| LLMC
-  EXT -.->|not called| LLMC
-  LOADER -.->|available, unused| API
-
-  classDef missing fill:#fee,stroke:#c00,stroke-width:1px,stroke-dasharray: 4 4;
-  class API,CLS,EXT,EVAL,LLMC missing;
+  UI -->|real data| API
+  Upload -->|real ingest| API
+  API --> CLS
+  API --> EXT
+  API --> EVAL
+  CLS --> LLMC
+  EXT --> LLMC
+  EVAL -.->|grounding verifier only| LLMC
+  LOADER --> API
+  API --> DB
+  DB --> UI
+  UI --> REVIEW
+  REVIEW --> API
 ```
 
-*Dashed red lines/boxes = not wired up yet.* In plain terms: the frontend is a genuinely good, working UI, but it's a puppet show — every email, field comparison, and trace shown on screen is hand-authored mock data in `Dashboard.tsx`, not the output of a real pipeline. The backend is a Flask skeleton with a working LLM client construction and nothing that calls it: `classifier.py` and `routes.py` each have a single import and no logic, `extractor.py` and `evaluator.py` are empty files, and the organizer-provided `loader.py` isn't referenced by our backend at all yet. None of the pipeline described in §4.2 exists in code today — that section is the target we're building toward this hackathon, not a description of the current build.
+**What's real, tested against live Supabase data, not mocked:** classification, extraction (combined SI+BL call per §6.4), the Literal Match Check + Grounding Verifier gating, the deterministic Comparator (weight-tolerant, container-count-aware), the Unit Normalizer, escalation with the 4-value `review_reason` enum, the frozen `submission.json` snapshot vs. the live mutable DB row split (§2.4-C), the append-only audit log, and the full human-review loop (resolve a case, view source evidence, see the automated-vs-corrected marker). `stats_bundle/the_coach.py` and `the_invigilator.py` run this end-to-end against real emails and grade the result — our own evidence this works, independent of the demo (§4.11 is validated by running these, not by a separate test suite).
+
+**Ingestion has four real sources**, not one: upload a local `inbox`/`attachments` folder pair, pull from cloud (S3/GCS) or Google Drive URIs, or — the one built beyond the original plan — a **Database** source that processes whatever dataset is already sitting in Supabase Storage directly, no upload needed, optionally pointed at a *different* Supabase project by URL/key instead of the server's own default (`GET /api/config` + `POST /api/ingest {source_type: "database"}`).
+
+**What's still a documented, deliberate gap, not an oversight:** a manual retry action for a processing failure (`is_processing_failure`) — automatic retry-with-backoff (§4.10) already runs inside every LLM call, but there's no `POST /retry` endpoint or button yet. This was tiered as genuinely optional in §7 and stays that way. There is also no public cloud URL yet — the app runs against a real, live (cloud-hosted) Supabase instance, but the Flask/Vite servers themselves are still run locally, not deployed.
 
 ### 4.2 Pipeline (target architecture, end to end)
 
@@ -297,22 +305,24 @@ The current `Dashboard.tsx` prototype was built and run against all 5 mock state
 10. **User-facing category labels must be human-readable**, not raw enum values — the non-comparison fallback screen currently prints the literal string `invoice_query` to the user instead of "Invoice Query."
 11. **The upload modal's submit action needs a real target.** It currently just calls `alert(...)` — once §4.9's API contract exists, "Run New Batch Ingestion" should call it for real.
 
-### 4.9 API contract (frontend ↔ backend)
+### 4.9 API contract (frontend ↔ backend) — as actually implemented
 
-Nothing in the repo currently defines this — `routes.py` is a single import with no routes, and the frontend has no fetch calls at all (§4.1). Before anyone can wire the dashboard to real data, the team needs an agreed contract. Proposed minimum surface, matching what the dashboard prototype already assumes exists:
+This originally proposed a `/runs`, `/emails/:id` shape before any code existed. The team's real implementation (`backend/app/routes.py`, registered under `/api`) took a different shape during build-out, so this documents what's actually there:
 
 | Method & path | Purpose | Notes |
 | --- | --- | --- |
-| `POST /runs` | Trigger a new batch run over the inbox dataset | Async — returns a `run_id` immediately; processing happens server-side (§4.7) |
-| `GET /runs` | List past runs for the sidebar's batch history | Returns `run_id`, `started_at`, `email_count`, `mismatch_count`, `needs_review_count` per §6.3 schema |
-| `GET /runs/:run_id/emails` | List processed emails for a run, for the inbox queue + filter pills | Returns each email's `category`, `current_status`, `current_review_reason`, `has_defect` |
-| `GET /emails/:email_id` | Full detail for one email | Includes the original email (sender, subject, body), `automated_status`/`current_status` pair, `awaiting_sender_response`/`is_processing_failure` flags, `defect_fields`, extracted SI/BL values, and the processing trace (§4.8, item 4) |
-| `GET /emails/:email_id/source` | Raw SI/BL attachment text for the source drawer | Must return an explicit "unreadable" marker rather than an empty body when extraction failed (§4.8, item 4) |
-| `POST /emails/:email_id/resolve` | Human resolves a `NEEDS_REVIEW` content case — one action covers both outcomes | Body: `{decision?, defect_fields?, notes, awaiting_sender_response?}`. If `decision` is set, resolves directly and updates `current_status`. If `awaiting_sender_response` is `true` instead, `decision` can be omitted — `current_status` stays `NEEDS_REVIEW`, the flag is set, and `notes` carries why. Either way, writes one audit log row; never touches `submission.json` (§2.4-C, §2.4-F) |
-| `POST /emails/:email_id/retry` | Re-run a processing failure through the pipeline | Only valid when `is_processing_failure` is true; writes an audit log row (`action: "retried"`) regardless of outcome (§2.4-F) |
-| `GET /emails/:email_id/audit-log` | History for one email, for §4.8 item 7 | Returns every escalation/resolution/retry row from `review_audit_log` |
+| `GET /api/config` | Lets the "Database" ingest tab pre-fill the default connection | Returns only the non-secret `default_supabase_url`; the key is never sent to the browser |
+| `POST /api/ingest` | Start a new run from any of four sources | `batch_archive` (zip) or `inbox_files`/`attachment_files` (local upload); `{source_type: "cloud"|"drive", inbox_uri, attachments_uri}`; or `{source_type: "database", supabase_url?, supabase_key?}` — processes the dataset already in Supabase Storage directly, optionally a *different* project than the server's own default. Returns `run_id` immediately |
+| `GET /api/stream-process?run_id=` | Server-sent-events stream that actually processes the batch (classify → extract → verify → compare → save), `max_workers=3` in parallel | Emits `INIT`/`WARNING`/`PROCESSING`/`DONE`; a `WARNING` fires if the dataset has a duplicate `email_id` (§4.11) |
+| `GET /api/runs` | List past runs for the sidebar's batch history | Returns every row from the `runs` table |
+| `GET /api/runs/latest` | The most recently started run, with its emails | Convenience wrapper around the next endpoint |
+| `GET /api/runs/<run_id>` | One run's emails, each including its `review_audit_log` rows | Used by the dashboard's run detail view |
+| `GET /api/attachments/content?path=&run_id=` | Raw SI/BL attachment text for the source drawer | Reads from the run's local batch folder, a custom Supabase project if the run used one, or the default Supabase project — resolved consistently per run (`_resolve_inbox_for_run`) |
+| `GET /api/emails/<email_name>/original?run_id=` | The originating email (sender/subject/body) for the source drawer | Reads straight from the same Inbox source as the attachment route, no schema change needed (§4.8 item 4) |
+| `GET /api/reviews` | The pending human-review queue (`MISMATCH`/`NEEDS_REVIEW`, excluding processing failures) | Backs the review screen's queue list |
+| `POST /api/reviews/<email_id>/resolve` | Human resolves a `NEEDS_REVIEW`/`MISMATCH` case — one action covers both outcomes (§2.4-F) | Body: `{decision?, defect_fields?, notes, awaiting_sender_response?}`. `decision` (`"OK"`/`"MISMATCH"`) resolves directly and updates `current_status`, clearing `current_review_reason`. `awaiting_sender_response: true` instead leaves `current_status` as `NEEDS_REVIEW` and just sets the flag. Either way, updates the placeholder audit-log row created at ingest time (never touches `submission.json`) |
 
-This isn't a full OpenAPI spec — it's the minimum needed so `routes.py` has something concrete to implement against and the frontend rebuild has something concrete to call, instead of both sides guessing.
+**Known gap, deliberate not accidental:** no `retry` endpoint for a processing failure (`is_processing_failure`) — automatic retry-with-backoff (§4.10) already runs inside each LLM call; a manual "try this email again" action was tiered as genuinely optional in §7 and stayed there.
 
 ### 4.10 Reliability requirements
 
@@ -382,20 +392,22 @@ Given the deterministic Confidence Gate and Comparator are the whole point of th
 
 > ⚠️ **Cloud infrastructure is required for this hackathon** — the demo needs to run at a public URL for judges, not just `localhost`. This section picks a stack biased toward "deploy in minutes, zero ops," since that's the actual constraint on hackathon weekend, not long-term scalability.
 
-### 6.1 Frontend — already scaffolded in `frontend/`
+### 6.1 Frontend — built and wired in `frontend/`
 
 - **React 19 + Vite** — already set up (`frontend/package.json`), fast dev loop.
 - **Tailwind CSS** — already configured (`frontend/tailwind.config.js`).
-- **lucide-react** — icon set already in use in `frontend/src/pages/Dashboard.tsx`.
-- The dashboard UI already matches the mockup drawn in the team's own schedule doc (sidebar of runs → email list → field-by-field detail view) — this is largely a wiring task (replace `INITIAL_RECORDS` mock data with real API calls), not a design task.
-- **Deploy:** Vercel (or Netlify) — connects directly to the repo, auto-deploys `frontend/` on push, free tier is enough for a hackathon demo.
+- **lucide-react** — icon set in use throughout `frontend/src/pages/Dashboard.tsx`.
+- The dashboard is wired to real data, no mock records — `GET /api/runs`, `/api/runs/:id`, and a live `/api/stream-process` SSE feed. The human-review screen (resolve form, source-evidence drawer, audit log, automated-vs-corrected marker) is built against the real endpoints in §4.9, not just the happy-path OK/MISMATCH views.
+- Branded as **Minion Lens** — logo and favicon wired (`frontend/public/logo.png`).
+- **Deploy:** not yet done — Vercel (or Netlify) remains the plan when it's time (connects directly to the repo, auto-deploys `frontend/` on push, free tier is enough for a hackathon demo).
 
-### 6.2 Backend — currently a bare scaffold in `backend/`
+### 6.2 Backend — built out in `backend/`
 
-- **Flask + Flask-Cors** — already in `backend/requirements.txt`, minimal and fast to stand up REST endpoints for the frontend.
-- **Centralized LLM client** (`backend/app/llm.py`) — already stubbed with an OpenAI client and env-based key loading (`python-dotenv`); a commented-out Gemini client is there too. **Recommendation:** pick one primary provider for the hackathon (OpenAI, given the client is already wired) to cut complexity, and keep the Gemini path as a documented fallback rather than building against two providers in parallel under time pressure.
-- Pipeline modules to build out: `classifier.py`, `extractor.py` (extraction + the grounding-verification pass from §2.4-B), `evaluator.py` (comparator + confidence gate), `routes.py` (API surface for the frontend) — all currently empty or near-empty scaffolds.
-- **Deploy:** Render or Railway — both support a Flask app with a `requirements.txt` out of the box, free/cheap tier, minutes to first deploy.
+- **Flask + Flask-Cors** (`backend/requirements.txt`), serving real REST endpoints under `/api` (§4.9).
+- **Centralized LLM client** (`backend/app/llm.py`) — a 4-provider switcher (OpenRouter / Gemini / OpenAI / Ollama), one block active at a time, all sharing the same `ask_json()` contract so the rest of the pipeline never needs to know which provider is active. **Gemini (direct)** is the active block by default — a cloud API anyone can use with just a key, no local install, which matters for sharing the project with teammates who aren't running a local model. Ollama stays available as a free, no-key local fallback for solo iteration.
+- Pipeline modules are built, not scaffolds: `classifier.py` (5-category classification), `extractor.py` (combined SI+BL extraction across `.txt`/`.pdf`/`.docx`/`.xlsx`), `evaluator.py` (Literal Match Check, Grounding Verifier, Unit Normalizer, deterministic Comparator + Confidence Gate), `routes.py` (the full API surface).
+- `loader.py`'s `Inbox` class supports both the master Supabase dataset and isolated per-run local batch folders, with thread-safe concurrent downloads (a real, fixed HTTP/2-under-concurrency bug on Windows shaped this) and an optional custom Supabase project override for the "database" ingest source (§4.9).
+- **Deploy:** not yet done — Render or Railway remains the plan (both support a Flask app from `requirements.txt` directly, minutes to a public URL).
 
 ### 6.3 Database — not required by the hackathon brief itself, but needed for what we're building
 
@@ -407,28 +419,30 @@ The brief's own scoring only needs a `submission.json` file. We need a real data
 
 Minimal schema:
 - `emails` — one row per processed email (`email_id`, `category`, `automated_status`, `automated_review_reason`, `current_status`, `current_review_reason`, `has_defect`, `defect_fields`, `awaiting_sender_response`, `is_processing_failure`, `run_id`, `processed_at`). The `automated_*` columns are write-once (frozen at pipeline output, exported verbatim to `submission.json`); `current_*` and the two flags start at their defaults and only change on human action — see §4.4.
-- `runs` — one row per batch run (`run_id`, `started_at`, `email_count`, `mismatch_count`, `needs_review_count`).
+- `runs` — one row per batch run (`run_id`, `started_at`, `completed_at`, `email_count`, `mismatch_count`, `needs_review_count`, `clear_count`, `spam_count` — see migration 005).
 - `review_audit_log` — append-only, schema per §4.4.
 
 ### 6.4 LLM / AI
 
-- **Provider:** OpenAI (already wired in `llm.py`) as primary; `.env.example` already reserves a `GEMINI_API_KEY` slot for a documented fallback/comparison, not a required dual-provider build.
+- **Provider:** Google **Gemini** (direct, `gemini-3.6-flash` by default) is the active block in `llm.py` — a cloud API, so anyone on the team can run the pipeline with just a `GEMINI_API_KEY`, no local model install. OpenRouter, OpenAI, and Ollama (free, local, no key) are each a fully-written, one-block-swap away in the same file — switching provider never touches `classifier.py`/`extractor.py`/`evaluator.py`, since they all just call `ask_json()`.
 - **Calls in the pipeline:** Classifier (1 call/email). For `BL_COMPARISON` emails: Field Extractor (**1 combined call** with both the SI and BL text, returning both 7-field JSONs — not 2 separate calls) — that's a guaranteed 2 LLM calls per comparison email. The Grounding Verifier is a **third, conditional call**: it only fires if the Literal Match Check (§2.4-B) can't resolve at least one field, so the worst case is 3 calls per comparison email, and the common case (all fields read verbatim or matched by a known format rule) can be as low as 2 — the verifier is skipped entirely. Everything else (`SI_REQUEST`/`INVOICE_QUERY`/`GENERAL`/`SPAM`) is 1 call total.
-- **Secrets:** real API keys never get committed — `.env.example` stays placeholder-only, and actual keys are set as environment secrets in Vercel/Render/Supabase's own dashboards. A leaked key in a public repo is a common, easily-avoided hackathon failure.
+- **Secrets:** real API keys never get committed — `.env.example` stays placeholder-only, real keys live only in each developer's own local `.env` (or, once deployed, as environment secrets in Vercel/Render/Supabase's own dashboards). A leaked key in a public repo is a common, easily-avoided hackathon failure.
 
 ### 6.5 Cloud infrastructure summary
 
-| Layer | Service | Why |
+| Layer | Service | Status |
 | --- | --- | --- |
-| Frontend hosting | Vercel | Git-connected auto-deploy, zero config for a Vite/React app, generous free tier. |
-| Backend hosting | Render or Railway | Deploys a Flask app from `requirements.txt` directly, minutes to a public URL. |
-| Database | Supabase (managed Postgres) | Zero-ops managed cloud DB, standard SQL, free tier covers hackathon scale. |
-| LLM | OpenAI API | Already integrated in `backend/app/llm.py`; single provider keeps the build simple under time pressure. |
+| Frontend hosting | Vercel (planned) | Not yet deployed — runs locally via `npm run dev` today. |
+| Backend hosting | Render or Railway (planned) | Not yet deployed — runs locally via `python run.py` today. |
+| Database & Storage | Supabase (managed Postgres + Storage) | **Live** — the inbox dataset, attachments, run/email/audit-log tables all run against a real, cloud-hosted Supabase project today, not a local stand-in. |
+| LLM | Google Gemini (direct) | **Live** — active provider in `backend/app/llm.py`; OpenRouter/OpenAI/Ollama each a one-block swap away. |
 | Local dev / scoring | Organizer's Docker bundle (`reference/sdoc-hackathon-docker`) | Used only for local development and self-eval scoring against the hidden reference set — not part of the deployed demo. |
 
 ---
 
 ## 7. Build Order & Team Assignment
+
+**Status: Tier 1 and Tier 2 are both complete and running against real data.** Tier 3 was mostly cut as planned, with one exception that turned out to be needed after all: the Unit Normalizer is built and active (§2.4-E's real weight-tolerance case did show up in the sample data, contrary to the original "no evidence it's needed" call below) — everything else in Tier 3 stayed cut, including the manual retry button, which remains a documented, deliberate gap (§4.9). The plan below is kept as-is for the record of how the build was actually sequenced.
 
 Two people on frontend, two on backend. This turns §2-§4's design into an actual sequence, so nobody spends hackathon hours on Tier 3 while Tier 1 isn't done yet. **Ground rule: build Tier 1 completely, end to end, before anyone touches Tier 2.** A fully working `OK`/`MISMATCH`/basic-`NEEDS_REVIEW` flow beats a half-built version of the full design — that's the entire point of tiering it.
 
@@ -470,14 +484,16 @@ Once real names replace "Backend Dev A/B" and "Frontend Dev A/B" above, update t
 
 ---
 
-## Open items still worth a quick team check-in
+## Open items — resolved, or still open, as of the actual build
 
-- **Validation target:** decide a concrete go/no-go number before demo day, e.g. "run self-eval after each stage lands, track Stage-1 macro-F1 and Stage-3 defect-F1, don't consider the pipeline demo-ready below some agreed threshold." No number is set yet — pick one once the first real self-eval run gives us a baseline to calibrate against.
-- Confirm the exact OpenAI model to use for classification vs. extraction vs. grounding verification (cost/latency/accuracy tradeoff per call type — likely a smaller/cheaper model for classification, a stronger one for extraction and verification).
-- Decide the Supabase schema migration approach (raw SQL vs. an ORM) once someone starts on `routes.py`.
-- Pick a `.pdf`/`.docx`/`.xlsx` parsing library for the Document Parser (§4.3) before the Advanced-stage work starts — not yet named anywhere in this doc.
-- Decide a max-concurrency limit for batch LLM calls (§4.7's full-dataset batch job) — needed to avoid tripping OpenAI rate limits once extraction + verification calls run in parallel across dozens of emails.
-- Confirm §4.9's API contract with whoever picks up `routes.py` and whoever picks up the frontend rebuild, before either starts, per user story #17.
-- Pick the exact tolerance threshold for weight comparison after unit normalization (§2.4-E) — e.g. ±0.5% — small enough to still catch a real discrepancy, large enough to absorb our own conversion rounding.
-- Write the container-count format parser rule for the Literal Match Check (§2.4-B) — the first field we've identified as stable enough to fully graduate off the LLM Grounding Verifier.
-- Decide the bounded retry limit for a human-triggered retry on a processing failure (§2.4-F) — e.g. does the manual retry button have its own cap, separate from the automatic backoff retries in §4.10, to avoid a case being retried forever.
+Most of these were genuinely open questions at the time this list was written. Here's where each one actually landed:
+
+- **Validation target** — still the one genuinely open item. `stats_bundle/the_coach.py`/`the_invigilator.py` now give real, repeatable accuracy/F1/confusion-matrix numbers to calibrate against (run them for a current baseline), but no single agreed go/no-go threshold has been formally written down.
+- ~~Confirm the exact OpenAI model~~ — moot; the active provider is Gemini (`gemini-3.6-flash`), used uniformly for all three call types rather than a different model per stage. Revisit if cost/latency profiling ever motivates splitting them.
+- ~~Decide the Supabase schema migration approach~~ — **resolved:** raw SQL, tracked as numbered files in `backend/migrations/`.
+- ~~Pick a `.pdf`/`.docx`/`.xlsx` parsing library~~ — **resolved:** `pdfplumber` (PDF, text-layer only, no OCR), `python-docx` (DOCX), `pandas` + `openpyxl` (XLSX).
+- ~~Decide a max-concurrency limit for batch LLM calls~~ — **resolved:** `max_workers=3` in `stream_batch_process()`/`the_coach.py`, kept conservative — a higher count (6) was tested and caused a real OOM crash while a local Ollama model was active; kept at 3 under Gemini too as a safe default against provider rate limits.
+- ~~Confirm §4.9's API contract~~ — moot; §4.9 now documents the contract as actually implemented.
+- ~~Pick the exact tolerance threshold for weight comparison~~ — **resolved, and revised from the original guess:** a fixed **±1kg** (not a relative percentage) — `evaluator.py`'s own comment documents why: a relative ±0.5% badly overshot on a large shipment, silently missing a real 1,000kg/0.46% discrepancy in testing.
+- ~~Write the container-count format parser rule~~ — **resolved:** `evaluator.py`'s `CONTAINER_COUNT_PATTERN` regex matches the sample data's `N x SIZE'TYPE` format, fully graduating that field off the Grounding Verifier.
+- ~~Decide the bounded retry limit for a human-triggered retry~~ — moot; no manual retry endpoint was built (§4.9's documented, deliberate Tier 3 gap), so there's no retry loop to bound yet.

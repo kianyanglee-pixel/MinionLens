@@ -200,7 +200,13 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
         }
 
     if not si_result["ok"] or not bl_result["ok"]:
-        return _needs_review("unreadable")
+        # A format we don't even try to parse (extractor.py's
+        # "rejected_format:{ext}") reuses wrong_doc_type per §2.4-D — no new
+        # review_reason value needed. A genuinely empty/corrupted text
+        # layer (readable format, unreadable content) stays "unreadable".
+        rejected = (si_result.get("error") or "").startswith("rejected_format:") or \
+                   (bl_result.get("error") or "").startswith("rejected_format:")
+        return _needs_review("wrong_doc_type" if rejected else "unreadable")
 
     if sum(si_result["found"].values()) == 0 or sum(bl_result["found"].values()) == 0:
         return _needs_review("wrong_doc_type")

@@ -3,21 +3,36 @@
 loader.py — access to the SDOC hackathon inbox, loaded either from a
 Supabase Storage bucket or an isolated local batch folder.
 
-    # Supabase source:
+    # Supabase source, using SUPABASE_URL/SUPABASE_KEY from the environment:
     inbox = Inbox("supabase")
+
+    # A different Supabase project — any project's URL + key, not just the
+    # one configured in .env:
+    inbox = Inbox("supabase", url="https://xyzcompany.supabase.co", key="...")
 
     # Isolated local batch folder (String or Path):
     inbox = Inbox("backend/data/batches/run_20260921_084144_3f331a")
 """
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 DEFAULT_SUPABASE_BUCKET = "emails_and_attachment"
 
 
 class Inbox:
-    def __init__(self, source="supabase"):
+    def __init__(self, source="supabase", url=None, key=None):
+        """`url`/`key` optionally point a "supabase" source at a specific
+        Supabase project instead of the one configured via SUPABASE_URL/
+        SUPABASE_KEY in the environment — lets a caller (e.g. the "database"
+        ingest source in routes.py) connect to any Supabase project by
+        passing its link, defaulting to the currently-configured one when
+        left unset."""
+        self._url_override = url
+        self._key_override = key
+
         # 1. Determine whether source is Supabase or a local/batch directory
         if isinstance(source, Path):
             self.source = str(source)
@@ -38,6 +53,7 @@ class Inbox:
 
         # 2. Setup Supabase attributes if required
         self._supabase_client = None
+        self._thread_local = threading.local()
         if self.is_supabase:
             self.bucket = (
                 self.source[len("supabase://"):]
@@ -50,12 +66,31 @@ class Inbox:
             self.attachments_dir = self.local_root / "attachments"
 
     # -- listing ---------------------------------------------------------
+    def _download_email(self, name, attempts=3):
+        """One inbox/<name> download, with a couple of retries for any
+        remaining transient blip."""
+        last_err = None
+        for _ in range(attempts):
+            try:
+                return json.loads(self._supabase_download(f"inbox/{name}"))
+            except Exception as err:
+                last_err = err
+        raise last_err
+
     def emails(self):
         """Return the list of email records (dicts)."""
         if self.is_supabase:
             files = self._supabase_list("inbox")
             names = sorted(f["name"] for f in files if f["name"].startswith("email_"))
-            return [json.loads(self._supabase_download(f"inbox/{name}")) for name in names]
+            # One HTTP download per file, done serially, took 3.5+ minutes
+            # for the full 520-email dataset before any processing could
+            # even start. These are independent GETs, so fetch them
+            # concurrently instead — order is preserved by executor.map.
+            # Benchmarked against the real 520-email dataset: 210s serial ->
+            # 27s at 8 workers -> 8s at 16 (24-32 only shaved off ~1s more,
+            # not worth the extra open connections).
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                return list(executor.map(self._download_email, names))
 
         # Local directory reading from batch-isolated folder
         if not self.inbox_dir.exists():
@@ -114,7 +149,13 @@ class Inbox:
         if not self.is_supabase:
             raise NotImplementedError("submit() is only supported when source='supabase'")
 
-        path = "submissions/submission.json"
+        # Was hardcoded to "submission.json" regardless of `filename` —
+        # every the_coach.py smoke-test run was silently overwriting the
+        # real, graded submission.json instead of writing its own
+        # submission_coach_{x}.json, defeating the whole point of §2.4-C's
+        # frozen-snapshot guarantee (the graded file must only ever reflect
+        # one real batch run, never a test run).
+        path = f"submissions/{filename}"
         data = json.dumps(submission, indent=2).encode()
         self._supabase().storage.from_(self.bucket).upload(
             path,
@@ -132,20 +173,39 @@ class Inbox:
         return json.loads(self._supabase_download("sample_submission.json"))
 
     # -- supabase helpers --------------------------------------------------
+    def _new_supabase_client(self):
+        from supabase import create_client
+        url = self._url_override or os.getenv("SUPABASE_URL")
+        key = self._key_override or os.getenv("SUPABASE_KEY")
+        if not url or not key:
+            raise RuntimeError(
+                'Inbox("supabase") needs a url+key (either passed in directly, '
+                "or via SUPABASE_URL/SUPABASE_KEY in the environment)"
+            )
+        return create_client(url, key)
+
     def _supabase(self):
         if self._supabase_client is None:
-            from supabase import create_client
-            url = os.getenv("SUPABASE_URL")
-            key = os.getenv("SUPABASE_KEY")
-            if not url or not key:
-                raise RuntimeError(
-                    'Inbox("supabase") needs SUPABASE_URL and SUPABASE_KEY in the environment'
-                )
-            self._supabase_client = create_client(url, key)
+            self._supabase_client = self._new_supabase_client()
         return self._supabase_client
 
+    def _thread_local_supabase(self):
+        """A separate client per worker thread — sharing one client's
+        underlying HTTP/2 connection across threads was corrupting under
+        real concurrency on Windows (WinError 10035 / httpcore
+        stream-handling errors). Each thread pays client-construction cost
+        once, not once per call. Used by every download path (attachment
+        reads during real concurrent pipeline processing, email listing,
+        single-email lookups) since all of them can now run from a worker
+        thread, not just the main thread."""
+        client = getattr(self._thread_local, "client", None)
+        if client is None:
+            client = self._new_supabase_client()
+            self._thread_local.client = client
+        return client
+
     def _supabase_download(self, path):
-        return self._supabase().storage.from_(self.bucket).download(path)
+        return self._thread_local_supabase().storage.from_(self.bucket).download(path)
 
     def _supabase_list(self, folder, page_size=1000):
         store = self._supabase().storage.from_(self.bucket)

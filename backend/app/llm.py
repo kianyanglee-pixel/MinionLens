@@ -2,21 +2,77 @@ import json
 import os
 import time
 from dotenv import load_dotenv
-from google import genai
-from google.genai import errors, types
 
 load_dotenv()
 
 MAX_RETRIES = 3
 RETRYABLE_STATUS_CODES = {429, 500, 503}
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+# ============================================================================
+# Pick ONE provider block below (uncomment it, comment the others). Every
+# block ends up defining the same `client`/`DEFAULT_MODEL` contract, so only
+# this file needs to change to switch providers — classifier.py/extractor.py/
+# evaluator.py just call ask_json(...) and don't care which provider it is.
+# ============================================================================
 
-# Reads from .env if set, otherwise defaults to a stable flash model
+# -- OpenRouter -----------------------------------------------------
+# One key, routes to many providers' models (Gemini, GPT, Claude, Llama, ...)
+# through an OpenAI-compatible API. https://openrouter.ai/docs
+# Needs OPENROUTER_API_KEY (and optionally OPENROUTER_MODEL) in .env.
+# from openai import OpenAI
+#
+# client = OpenAI(
+#     base_url="https://openrouter.ai/api/v1",
+#     api_key=os.getenv("OPENROUTER_API_KEY"),
+# )
+# DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+
+# -- Google Gemini (direct) (ACTIVE) ------------------------------------------
+# Needs GEMINI_API_KEY (and optionally GEMINI_MODEL) in .env. Cloud-hosted —
+# works for anyone with a key, no local install needed (unlike Ollama below),
+# which is what makes this the right choice for sharing the project with
+# someone who isn't running Ollama themselves.
+from google import genai
+from google.genai import errors, types
+
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
+# -- OpenAI (direct) ----------------------------------------------------------
+# Needs OPENAI_API_KEY (and optionally OPENAI_MODEL) in .env.
+# from openai import OpenAI
+#
+# client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+# -- Ollama (local) ------------------------------------------------------------
+# Runs entirely on your own machine via `ollama serve` (default port 11434) —
+# free, no API key, and no rate limit/quota from a third party, since nothing
+# leaves your computer. Trade-off: speed and output quality depend on your
+# hardware and the model you pull, so worth testing on a few emails before
+# trusting it for a full batch run. Install: https://ollama.com/download,
+# then pull the model first, e.g. `ollama pull llama3.1:8b`.
+# Uses Ollama's OpenAI-compatible endpoint, so it shares the OpenRouter/OpenAI
+# call shape below — no new dependency needed.
+# Needs nothing in .env by default; OLLAMA_BASE_URL/OLLAMA_MODEL optional.
+# NOTE: this only works for local development — a cloud-hosted backend
+# (Render/Railway/etc.), or a teammate without Ollama installed, needs one of
+# the cloud provider blocks above instead.
+# from openai import OpenAI
+#
+# client = OpenAI(
+#     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+#     api_key="ollama",  # unused by Ollama, but the client requires a value
+# )
+# DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+
+# -- ask_json for the Gemini (direct) block above (ACTIVE) -------------------
 def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -> dict:
+    """Gemini (direct) call shape. If you switch to the OpenRouter/OpenAI/
+    Ollama block above instead, swap this function body for the one
+    commented out below it (different call shape, different response
+    shape)."""
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
@@ -34,8 +90,49 @@ def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -
             if e.code not in RETRYABLE_STATUS_CODES or attempt == MAX_RETRIES - 1:
                 raise
             time.sleep(2 ** attempt)
+        except Exception:
+            # A raw network-level failure (timeout, connection reset, DNS)
+            # from the underlying client doesn't necessarily subclass
+            # errors.APIError, so it would otherwise skip retry entirely —
+            # these are exactly the transient case retries exist for.
+            if attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)
 
     try:
         return json.loads(response.text)
     except (json.JSONDecodeError, AttributeError):
         return {"error": "invalid_json", "raw": getattr(response, "text", "")}
+
+
+# -- ask_json for the OpenRouter/OpenAI/Ollama blocks above, if you switch --
+# -- to one of them instead (all three go through the `openai` package's ---
+# -- chat.completions API, so this one body covers whichever is uncommented)
+# -- NOTE for Ollama specifically: not every local model reliably honors
+# -- response_format={"type": "json_object"} the way hosted models do — if
+# -- you see a lot of {"error": "invalid_json"} results, try a model known
+# -- for good JSON-mode support (e.g. llama3.1) before assuming it's a bug.
+# def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -> dict:
+#     for attempt in range(MAX_RETRIES):
+#         try:
+#             response = client.chat.completions.create(
+#                 model=model,
+#                 temperature=0,
+#                 response_format={"type": "json_object"},
+#                 messages=[
+#                     {"role": "system", "content": system_prompt},
+#                     {"role": "user", "content": user_prompt},
+#                 ],
+#             )
+#             break
+#         except Exception as e:
+#             status = getattr(e, "status_code", None)
+#             if status not in RETRYABLE_STATUS_CODES or attempt == MAX_RETRIES - 1:
+#                 raise
+#             time.sleep(2 ** attempt)
+#
+#     content = response.choices[0].message.content
+#     try:
+#         return json.loads(content)
+#     except json.JSONDecodeError:
+#         return {"error": "invalid_json", "raw": content}
