@@ -17,7 +17,7 @@ FIELD_NAMES = (
     "gross_weight_kg",
 )
 
-_FIELD_RULES = """- shipper, consignee, notify_party must be only the party/company name, never the following street address, city, or country lines.
+_FIELD_RULES = """- shipper, consignee, notify_party must be ONLY the core company/entity name — never any address, city, country, or postal code text attached to it. This applies even when the source puts the name and its address in the SAME cell or line, separated by a symbol like "|" or ";", instead of on separate lines (common in spreadsheet-derived documents) — still extract just the name portion in that case. The same real-world party must come out identically no matter which document or format it was read from.
 - port_of_loading and port_of_discharge should include the place name (and country/code if given), not vessel or voyage details.
 - container_count must be a plain integer (count containers, ignore container type codes like 40HC).
 - gross_weight_kg must be an object {"value": <number>, "unit": "<unit exactly as written, e.g. KG, LBS, G, MT>"} — report the raw number and unit as written; do NOT convert units yourself, a separate deterministic step handles that.

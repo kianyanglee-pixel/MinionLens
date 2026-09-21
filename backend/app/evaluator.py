@@ -18,7 +18,17 @@ FIELD_NAMES = tuple(FIELD_LABELS)
 
 FUZZY_MATCH_THRESHOLD = 90
 LITERAL_MATCH_THRESHOLD = 90
-WEIGHT_TOLERANCE_PCT = 0.005  # +/-0.5%, absorbs unit-conversion rounding (§2.4-E)
+# Fixed, not relative — this tolerance exists only to absorb unit-conversion
+# rounding (a sub-kg problem regardless of shipment size), not real-world
+# measurement variance. A relative percentage badly overshoots on large
+# shipments: confirmed via a real case where a genuine 1,000kg / 0.46%
+# discrepancy on a ~217,000kg shipment was silently missed under the old
+# +/-0.5% relative tolerance (§2.4-E). +/-1kg comfortably covers the worst
+# realistic case (a source document rounding an LBS value to the nearest
+# whole pound, confirmed at ~0.23kg max: 22000 KG vs 48502 LBS -> 0.137kg
+# gap) with room to spare, while still catching the 1,000kg case above by
+# three orders of magnitude.
+WEIGHT_TOLERANCE_KG = 1.0
 
 # The sample dataset always writes container count as "N x SIZE'TYPE" (e.g.
 # "6 x 40'HC") — this pattern lets the Literal Match Check resolve that
@@ -121,16 +131,32 @@ def _compare_container_count(si_value, bl_value, si_text, bl_text):
 
 def _compare_weight(si_value, bl_value):
     """Unit Normalizer + weight comparison (§2.4-E) — deterministic, no LLM.
-    Converts both sides to kg before comparing, with a relative tolerance to
-    absorb unit-conversion rounding rather than exact-match false-flagging.
-    No identifiable unit on either side is low-confidence, not a silent kg
-    assumption — routes to review like any other ungrounded field."""
+    Converts both sides to kg before comparing, with a small fixed-kg
+    tolerance to absorb unit-conversion rounding rather than exact-match
+    false-flagging. No identifiable unit on either side is low-confidence,
+    not a silent kg assumption — routes to review like any other ungrounded
+    field."""
     si_kg = to_kg(*_weight_parts(si_value))
     bl_kg = to_kg(*_weight_parts(bl_value))
     if si_kg is None or bl_kg is None:
         return None
-    tolerance = WEIGHT_TOLERANCE_PCT * max(abs(si_kg), abs(bl_kg))
-    return abs(si_kg - bl_kg) <= tolerance
+    return abs(si_kg - bl_kg) <= WEIGHT_TOLERANCE_KG
+
+
+def _strip_pipe_suffix(value):
+    """Spreadsheet-derived party fields sometimes combine the name and its
+    address in one cell, separated by '|' (e.g. "APRIL FINE PAPER TRADING |
+    ON BEHALF OF ...; SINGAPORE 068896"), which the extraction prompt is
+    told to exclude but doesn't always manage to in practice — confirmed via
+    a real case where this caused the identical real-world shipper to be
+    extracted with the address attached on one side but not the other,
+    flagging a false mismatch. '|' never appears inside a genuine field
+    value in this dataset's format, so stripping everything from the first
+    one onward is a safe, deterministic redundant layer on top of the
+    prompt fix, not a heuristic that risks hiding a real difference."""
+    if isinstance(value, str) and "|" in value:
+        return value.split("|", 1)[0]
+    return value
 
 
 def _compare_text(si_value, bl_value) -> bool:
@@ -139,7 +165,8 @@ def _compare_text(si_value, bl_value) -> bool:
     whitespace/punctuation noise, never a semantic 'are these the same
     entity' judgment call (a real value mismatch, like the SI/BL consignee
     example in the PRD, must be flagged, not explained away)."""
-    si_norm, bl_norm = _normalize_text(si_value), _normalize_text(bl_value)
+    si_norm = _normalize_text(_strip_pipe_suffix(si_value))
+    bl_norm = _normalize_text(_strip_pipe_suffix(bl_value))
     if not si_norm or not bl_norm:
         return False
     if si_norm == bl_norm:
