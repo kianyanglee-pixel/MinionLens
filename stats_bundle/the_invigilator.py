@@ -2,8 +2,8 @@
 
 Downloads submission.json from Supabase Storage (submissions/submission.json,
 the file routes.py's create_run() uploads via Inbox.submit()) and diffs it,
-entry by entry, against this folder's ground_truth.json. Writes a plain-text
-report card to report_card/performance_{X}.txt, X auto-incrementing per run.
+entry by entry, against this folder's ground_truth.json. Writes a folder of
+CSV files to report_card/performance_{X}/, X auto-incrementing per run.
 
 "LLM over LLM": every metric, confusion matrix, and mistake list is computed
 with plain deterministic code — no AI involved, same inputs always give the
@@ -12,6 +12,7 @@ section, which calls our own llm.py's ask_json() to have the active LLM
 provider critique the pipeline's own mistakes and suggest fixes. Nowhere
 else in this file calls an LLM.
 """
+import csv
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -93,12 +94,13 @@ def _load_submission(inbox: Inbox) -> dict:
 
 
 def _next_index() -> int:
-    """Shared counter for performance_{X}.txt and graphs_{X}.jpg, so a run's
-    text report and its dashboard always carry the same X."""
+    """Shared counter for performance_{X}/ (a folder of CSVs) and
+    graphs_{X}.jpg, so a run's report and its dashboard always carry the
+    same X."""
     REPORT_CARD_DIR.mkdir(parents=True, exist_ok=True)
     SUMMARY_GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
     x = 1
-    while (REPORT_CARD_DIR / f"performance_{x}.txt").exists() or (SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg").exists():
+    while (REPORT_CARD_DIR / f"performance_{x}").exists() or (SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg").exists():
         x += 1
     return x
 
@@ -625,6 +627,11 @@ def get_ai_recommendations(report: dict, inbox: Inbox) -> dict:
         "harness_changes": harness_changes if isinstance(harness_changes, list) else [],
         "prompt_changes": prompt_changes if isinstance(prompt_changes, list) else [],
         "general_advice": general_advice if isinstance(general_advice, list) else [],
+        # Kept only so the report can show it verbatim when all three lists
+        # above end up empty — lets you see whether the model genuinely had
+        # nothing to say, or said something in the wrong shape that got
+        # silently dropped by the isinstance checks above.
+        "raw_response": result,
     }
 
 
@@ -682,13 +689,21 @@ def _render_recommendations_section(recommendations: dict) -> list:
         recommendations["prompt_changes"],
     )
     _render_general_advice_items(lines, recommendations["general_advice"])
+
+    if not recommendations["harness_changes"] and not recommendations["prompt_changes"] and not recommendations["general_advice"]:
+        lines.append(SUBRULE)
+        lines.append("All three lists above came back empty — raw LLM response, for debugging:")
+        lines.append(SUBRULE)
+        lines.append(json.dumps(recommendations.get("raw_response"), indent=2))
+        lines.append("")
+
     return lines
 
 
-def render_text(report: dict, recommendations: dict) -> str:
+def render_text(report: dict, recommendations: dict, title: str = "THE INVIGILATOR — Pipeline Report Card") -> str:
     lines = [
         RULE,
-        "THE INVIGILATOR — Pipeline Report Card",
+        title,
         f"Run by: {_git_username()}",
         f"Evaluated at: {report['evaluated_at']}",
         f"AI recommendations powered by: {_llm_info_line()}",
@@ -857,6 +872,135 @@ def render_graphs(report: dict, output_path: Path) -> None:
     plt.close(fig)
 
 
+def _write_csv(path: Path, headers: list, rows: list) -> None:
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if headers:
+            writer.writerow(headers)
+        writer.writerows(rows)
+
+
+def render_csv(report: dict, recommendations: dict, output_dir: Path,
+               title: str = "THE INVIGILATOR", extra_summary_rows: list = None) -> None:
+    """Same content as render_text(), as a folder of plain CSV files instead
+    of one .txt file — one CSV per metric (a single CSV can't hold multiple
+    tables/sheets the way a workbook can), plus a flattened Mistakes CSV
+    and an AI Recommendations CSV. Every value is plain, un-truncated text —
+    CSV cells have no width to resize in the first place."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_rows = []
+    if extra_summary_rows:
+        summary_rows.extend(extra_summary_rows)
+    summary_rows += [
+        ("Report", title),
+        ("Run by", _git_username()),
+        ("Evaluated at", report["evaluated_at"]),
+        ("AI recommendations powered by", _llm_info_line()),
+        ("Emails in answer key", report["ground_truth_count"]),
+        ("Emails in submission", report["submission_count"]),
+        ("Emails actually graded", f"{report['evaluated_count']} ({_pct(report['rollups']['coverage'])} coverage)"),
+        ("Missing from submission", ", ".join(report["missing_in_submission"]) or "none"),
+        ("Extra in submission, not in answer key", ", ".join(report["extra_in_submission"]) or "none"),
+        ("Row-level exact match", f"{_pct(report['rollups']['row_exact_match_rate'])} "
+                                   f"({report['rollups']['row_exact_match_count']}/{report['rollups']['row_exact_match_total']})"),
+        ("Processing-failure rate", f"{_pct(report['rollups']['processing_failure_rate'])} "
+                                     f"({report['rollups']['processing_failure_count']} emails)"),
+        ("Coverage", _pct(report["rollups"]["coverage"])),
+    ]
+    _write_csv(output_dir / "summary.csv", ["Field", "Value"], summary_rows)
+
+    def multinomial_csv(filename: str, section: dict, subset_note: str = None):
+        rows = [
+            ("Accuracy", f"{_pct(section['accuracy'])} ({section['correct']}/{section['total']} correct)"),
+            ("Macro-F1", section["macro_f1"]),
+        ]
+        _write_csv(output_dir / f"{filename}_summary.csv", ["Metric", "Value"], rows)
+
+        per_class_rows = [
+            (label, s["precision"], s["recall"], s["f1"], s["support"])
+            for label, s in sorted(section["per_class"].items())
+        ]
+        _write_csv(output_dir / f"{filename}_per_label.csv", ["Label", "Precision", "Recall", "F1", "Support"], per_class_rows)
+
+        labels = sorted(section["confusion_matrix"].keys())
+        cm_rows = [
+            [label] + [section["confusion_matrix"][label].get(p, 0) for p in labels]
+            for label in labels
+        ]
+        _write_csv(output_dir / f"{filename}_confusion_matrix.csv", ["Actual \\ Predicted"] + labels, cm_rows)
+
+        if subset_note:
+            _write_csv(output_dir / f"{filename}_subset.csv", ["Note"], [[subset_note]])
+
+    multinomial_csv("category", report["category"])
+    multinomial_csv("status", report["status"])
+    multinomial_csv(
+        "review_reason", report["review_reason"],
+        _render_subset_line(report["review_reason"]["subset"], "needed review"),
+    )
+
+    df = report["defect_fields"]
+    _write_csv(output_dir / "defect_fields_summary.csv", ["Metric", "Value"], [
+        ("Exact-match accuracy", _pct(df["exact_match_accuracy"])),
+        ("Mean Jaccard overlap", df["mean_jaccard_similarity"]),
+    ])
+    per_field_rows = [(f, s["precision"], s["recall"]) for f, s in sorted(df["per_field"].items())]
+    _write_csv(output_dir / "defect_fields_per_field.csv", ["Field", "Precision", "Recall"], per_field_rows)
+    _write_csv(output_dir / "defect_fields_subset.csv", ["Note"],
+               [[_render_subset_line(df["subset"], "had a defect")]])
+
+    hd = report["has_defect"]
+    cm = hd["confusion_matrix"]
+    _write_csv(output_dir / "has_defect_summary.csv", ["Metric", "Value"], [
+        ("Accuracy", _pct(hd["accuracy"])),
+        ("Precision", hd["precision"]),
+        ("Recall", hd["recall"]),
+        ("F1", hd["f1"]),
+        ("Cohen's Kappa", hd["cohens_kappa"]),
+    ])
+    _write_csv(output_dir / "has_defect_confusion_matrix.csv",
+               ["", "Predicted: defect", "Predicted: no defect"],
+               [["Actual: defect", cm["tp"], cm["fn"]], ["Actual: no defect", cm["fp"], cm["tn"]]])
+    _write_csv(output_dir / "has_defect_subset.csv", ["Note"],
+               [[_render_subset_line(hd["subset"], "had a defect")]])
+
+    mistake_rows = []
+    for field_name in ("category", "status", "review_reason"):
+        for err in report[field_name]["errors"]:
+            mistake_rows.append((field_name, err["email_id"], err["true"], err["predicted"], "", ""))
+    for err in df["errors"]:
+        mistake_rows.append((
+            "defect_fields", err["email_id"],
+            ", ".join(err["true"]) or "(none)", ", ".join(err["predicted"]) or "(none)",
+            ", ".join(err["missing"]), ", ".join(err["extra"]),
+        ))
+    for err in hd["errors"]:
+        mistake_rows.append(("has_defect", err["email_id"], err["true"], err["predicted"], "", ""))
+    _write_csv(output_dir / "mistakes.csv", ["Field", "Email ID", "Actual", "Predicted", "Missing", "Extra"], mistake_rows)
+
+    if recommendations.get("error"):
+        _write_csv(output_dir / "ai_recommendations.csv", ["Error"], [[recommendations["error"]]])
+    else:
+        rec_rows = []
+        for item in recommendations["harness_changes"]:
+            if isinstance(item, dict):
+                rec_rows.append(("Harness change", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
+        for item in recommendations["prompt_changes"]:
+            if isinstance(item, dict):
+                rec_rows.append(("Prompt change", item.get("file", "?"), item.get("change", ""), item.get("why", "")))
+        for item in recommendations["general_advice"]:
+            if isinstance(item, dict):
+                rec_rows.append(("General advice", "", item.get("observation", ""), item.get("why", "")))
+        if rec_rows:
+            _write_csv(output_dir / "ai_recommendations.csv", ["Type", "File", "Change / observation", "Why"], rec_rows)
+        else:
+            _write_csv(output_dir / "ai_recommendations.csv", ["Note"], [
+                ["All three lists came back empty — raw LLM response below, for debugging:"],
+                [json.dumps(recommendations.get("raw_response"))],
+            ])
+
+
 def main():
     print(f"Active LLM: {_llm_info_line()}")
     ground_truth = _load_ground_truth()
@@ -866,13 +1010,13 @@ def main():
     recommendations = get_ai_recommendations(report, inbox)
 
     x = _next_index()
-    report_path = REPORT_CARD_DIR / f"performance_{x}.txt"
+    report_dir = REPORT_CARD_DIR / f"performance_{x}"
     graph_path = SUMMARY_GRAPHS_DIR / f"graphs_{x}.jpg"
 
-    report_path.write_text(render_text(report, recommendations), encoding="utf-8")
+    render_csv(report, recommendations, report_dir)
     render_graphs(report, graph_path)
 
-    print(f"Wrote {report_path}")
+    print(f"Wrote {report_dir}/*.csv")
     print(f"Wrote {graph_path}")
     print(f"  evaluated {report['evaluated_count']}/{report['ground_truth_count']} emails")
     print(f"  category accuracy:  {_pct(report['category']['accuracy'])}")
