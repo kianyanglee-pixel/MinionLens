@@ -19,12 +19,16 @@ FIELD_NAMES = tuple(FIELD_LABELS)
 FUZZY_MATCH_THRESHOLD = 90
 LITERAL_MATCH_THRESHOLD = 90
 # Fixed, not relative — this tolerance exists only to absorb unit-conversion
-# rounding (a sub-kg, floating-point-precision problem regardless of
-# shipment size), not real-world measurement variance. A relative percentage
-# badly overshoots on large shipments: confirmed via a real case where a
-# genuine 1,000kg / 0.46% discrepancy on a ~217,000kg shipment was silently
-# missed under the old +/-0.5% relative tolerance (§2.4-E).
-WEIGHT_TOLERANCE_KG = 2.0
+# rounding (a sub-kg problem regardless of shipment size), not real-world
+# measurement variance. A relative percentage badly overshoots on large
+# shipments: confirmed via a real case where a genuine 1,000kg / 0.46%
+# discrepancy on a ~217,000kg shipment was silently missed under the old
+# +/-0.5% relative tolerance (§2.4-E). +/-1kg comfortably covers the worst
+# realistic case (a source document rounding an LBS value to the nearest
+# whole pound, confirmed at ~0.23kg max: 22000 KG vs 48502 LBS -> 0.137kg
+# gap) with room to spare, while still catching the 1,000kg case above by
+# three orders of magnitude.
+WEIGHT_TOLERANCE_KG = 1.0
 
 # The sample dataset always writes container count as "N x SIZE'TYPE" (e.g.
 # "6 x 40'HC") — this pattern lets the Literal Match Check resolve that
