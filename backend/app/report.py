@@ -18,7 +18,7 @@ def build_report(result: dict, run_id: str) -> tuple:
     processing_failure = result.get("processing_failure", False)
 
     if comparison is None:
-        status = None
+        status = "OK"
         review_reason = None
         has_defect = False
         defect_fields = []

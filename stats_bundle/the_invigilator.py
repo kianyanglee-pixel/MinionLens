@@ -15,6 +15,7 @@ else in this file calls an LLM.
 import json
 from collections import Counter
 from datetime import datetime, timezone
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,9 +34,52 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(BACKEND_DIR / ".env")
 
 from loader import Inbox  # noqa: E402
-from app.llm import ask_json  # noqa: E402
+from app.llm import ask_json, client, DEFAULT_MODEL  # noqa: E402
+from app import db  # noqa: E402
+from app.classifier import classify_email  # noqa: E402
+from app.evaluator import compare_documents  # noqa: E402
+from app.extractor import extract_field_pair, extract_fields  # noqa: E402
+from app.unit_normalizer import to_kg  # noqa: E402
 
 SUBMISSION_PATH = "submissions/submission.json"
+
+
+def _detect_llm_provider() -> str:
+    """Figures out which of llm.py's provider blocks is currently active by
+    inspecting the `client` object it constructed — llm.py only ever
+    uncomments one block at a time, so this stays accurate without llm.py
+    needing to declare its own provider name anywhere."""
+    module_name = type(client).__module__
+
+    if "genai" in module_name:
+        return "Google Gemini (direct)"
+
+    base_url = str(getattr(client, "base_url", ""))
+    if "openrouter.ai" in base_url:
+        return "OpenRouter"
+    if "localhost:11434" in base_url or "ollama" in base_url:
+        return "Ollama (local)"
+    if "api.openai.com" in base_url:
+        return "OpenAI (direct)"
+    return f"Unknown provider (client={module_name}, base_url={base_url or 'n/a'})"
+
+
+def _llm_info_line() -> str:
+    return f"{_detect_llm_provider()} — model: {DEFAULT_MODEL}"
+
+
+def _git_username() -> str:
+    """Reads the machine's configured git user.name — on this repo that's
+    the same as the GitHub username. Falls back to "unknown" if git isn't
+    installed/configured, so a missing username never crashes a report."""
+    try:
+        result = subprocess.run(
+            ["git", "config", "user.name"],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _load_ground_truth() -> dict:
@@ -264,6 +308,27 @@ def evaluate(ground_truth: dict, submission: dict) -> dict:
         for eid in common_ids
     ]
 
+    review_reason = _multinomial_metrics(review_reason_triples)
+    defect_fields = _defect_fields_metrics(defect_fields_triples)
+    has_defect = _binary_metrics(has_defect_triples)
+
+    # True-positive-subset stats: review_reason/defect_fields can only ever
+    # be non-null/non-empty when the pipeline itself decided NEEDS_REVIEW/
+    # MISMATCH, so scoring them over every email pads the headline accuracy
+    # with cases that can't meaningfully be wrong. These numbers restrict to
+    # just the emails where the answer key says a real value should be
+    # there, so they can't be inflated by that padding.
+    review_reason_subset = [t for t in review_reason_triples if t[1] != "null"]
+    review_reason_subset_correct = sum(1 for _, t, p in review_reason_subset if t == p)
+    defect_fields_subset = [t for t in defect_fields_triples if t[1]]
+    defect_fields_subset_correct = sum(1 for _, t, p in defect_fields_subset if set(t) == set(p))
+    review_reason["subset"] = {"total": len(review_reason_subset), "correct": review_reason_subset_correct}
+    defect_fields["subset"] = {"total": len(defect_fields_subset), "correct": defect_fields_subset_correct}
+    has_defect["subset"] = {
+        "total": has_defect["confusion_matrix"]["tp"] + has_defect["confusion_matrix"]["fn"],
+        "correct": has_defect["confusion_matrix"]["tp"],
+    }
+
     return {
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "ground_truth_count": len(ground_truth),
@@ -273,9 +338,9 @@ def evaluate(ground_truth: dict, submission: dict) -> dict:
         "extra_in_submission": extra_in_submission,
         "category": _multinomial_metrics(category_triples),
         "status": _multinomial_metrics(status_triples),
-        "review_reason": _multinomial_metrics(review_reason_triples),
-        "defect_fields": _defect_fields_metrics(defect_fields_triples),
-        "has_defect": _binary_metrics(has_defect_triples),
+        "review_reason": review_reason,
+        "defect_fields": defect_fields,
+        "has_defect": has_defect,
         "rollups": _rollups(ground_truth, submission, common_ids),
     }
 
@@ -288,6 +353,13 @@ SUBRULE = "-" * 70
 
 def _pct(fraction: float) -> str:
     return f"{fraction * 100:.1f}%"
+
+
+def _render_subset_line(subset: dict, noun: str) -> str:
+    total, correct = subset["total"], subset["correct"]
+    if total == 0:
+        return f"(No emails in the answer key actually needed {noun} — nothing to check here.)"
+    return f"Of the {total} emails that truly {noun}, {correct} got it exactly right ({_pct(correct / total)})."
 
 
 def _render_multinomial_section(title: str, description: str, section: dict) -> list:
@@ -410,16 +482,21 @@ confusion matrices, the worst-performing labels/fields, the most common misclass
 real email and SI/BL attachment content behind a handful of emails it got wrong, so you can see exactly what
 those documents actually said.
 
-Suggest concrete, specific next steps to improve accuracy, split into two groups:
+Suggest concrete, specific next steps to improve accuracy, split into three groups:
 - "harness_changes": deterministic, non-LLM logic changes in evaluator.py (e.g. fuzzy-match thresholds, the
   grounding/literal-match logic, weight tolerance) that could fix a pattern of errors without touching any prompt.
 - "prompt_changes": specific wording changes to the system prompts in classifier.py, evaluator.py's grounding
   verifier, or extractor.py.
+- "general_advice": anything worth flagging that doesn't fit either bucket above — e.g. the active LLM/model
+  itself may be a poor fit for this task (too small, weak JSON-mode support, weak instruction-following for its
+  size), a pattern that looks like noisy or ambiguous ground truth rather than a pipeline bug, a stage that may
+  need a different approach entirely rather than a prompt tweak, or a systemic issue spanning multiple stages.
 
 Every suggestion must reference the actual pattern in the data given to you — and, where relevant, what the
 real document text actually said — not generic advice. Respond with strict JSON:
 {"harness_changes": [{"file": "<filename>", "change": "<specific change>", "why": "<pattern that motivates it>"}],
-"prompt_changes": [{"file": "<filename>", "change": "<specific change>", "why": "<pattern that motivates it>"}]}"""
+"prompt_changes": [{"file": "<filename>", "change": "<specific change>", "why": "<pattern that motivates it>"}],
+"general_advice": [{"observation": "<specific observation or suggestion>", "why": "<pattern that motivates it>"}]}"""
 
 
 def _pick_evidence_email_ids(report: dict, limit: int = 6) -> list:
@@ -543,9 +620,11 @@ def get_ai_recommendations(report: dict, inbox: Inbox) -> dict:
 
     harness_changes = result.get("harness_changes")
     prompt_changes = result.get("prompt_changes")
+    general_advice = result.get("general_advice")
     return {
         "harness_changes": harness_changes if isinstance(harness_changes, list) else [],
         "prompt_changes": prompt_changes if isinstance(prompt_changes, list) else [],
+        "general_advice": general_advice if isinstance(general_advice, list) else [],
     }
 
 
@@ -559,6 +638,22 @@ def _render_recommendation_items(lines: list, title: str, items: list) -> None:
             change = item.get("change", "")
             why = item.get("why")
             lines.append(f"  [{file}] {change}")
+            if why:
+                lines.append(f"    why: {why}")
+    else:
+        lines.append("  (none suggested)")
+    lines.append("")
+
+
+def _render_general_advice_items(lines: list, items: list) -> None:
+    lines.append("General advice (model choice, data quality, or anything else outside harness/prompt tweaks):")
+    if items:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            observation = item.get("observation", "")
+            why = item.get("why")
+            lines.append(f"  - {observation}")
             if why:
                 lines.append(f"    why: {why}")
     else:
@@ -586,6 +681,7 @@ def _render_recommendations_section(recommendations: dict) -> list:
         lines, "Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py)",
         recommendations["prompt_changes"],
     )
+    _render_general_advice_items(lines, recommendations["general_advice"])
     return lines
 
 
@@ -593,7 +689,9 @@ def render_text(report: dict, recommendations: dict) -> str:
     lines = [
         RULE,
         "THE INVIGILATOR — Pipeline Report Card",
+        f"Run by: {_git_username()}",
         f"Evaluated at: {report['evaluated_at']}",
+        f"AI recommendations powered by: {_llm_info_line()}",
         RULE,
         "",
         f"Emails in answer key:     {report['ground_truth_count']}",
@@ -626,8 +724,14 @@ def render_text(report: dict, recommendations: dict) -> str:
         "(only set when status is NEEDS_REVIEW)",
         report["review_reason"],
     )
+    lines.append(_render_subset_line(report["review_reason"]["subset"], "needed review"))
+    lines.append("")
     lines += _render_defect_fields_section(report["defect_fields"])
+    lines.append(_render_subset_line(report["defect_fields"]["subset"], "had a defect"))
+    lines.append("")
     lines += _render_has_defect_section(report["has_defect"])
+    lines.append(_render_subset_line(report["has_defect"]["subset"], "had a defect"))
+    lines.append("")
 
     rollups = report["rollups"]
     lines += [
@@ -689,16 +793,17 @@ def _plot_confusion_heatmap(ax, section: dict, title: str) -> None:
                         color="white" if value > peak / 2 else "black")
 
 
-def _plot_per_label_f1(ax, section: dict, title: str) -> None:
-    items = sorted(section["per_class"].items(), key=lambda kv: kv[1]["f1"])
-    labels = [k for k, _ in items]
-    values = [v["f1"] for _, v in items]
-    ax.barh(labels, values, color="#DD8452")
-    ax.set_xlim(0, 1.1)
-    ax.set_xlabel("F1 score")
-    ax.set_title(title)
-    for i, v in enumerate(values):
-        ax.text(v + 0.02, i, f"{v:.2f}", va="center", fontsize=8)
+def _plot_defect_fields_correct_wrong(ax, section: dict) -> None:
+    total = section["total"]
+    wrong = len(section["errors"])
+    correct = total - wrong
+    values = [correct, wrong]
+    bars = ax.bar(["Correct\n(every field right)", "Wrong\n(at least one field off)"], values, color=["#4C72B0", "#DD8452"])
+    ax.set_ylabel("Emails")
+    ax.set_title("Defect fields — exact match or not")
+    for bar, v in zip(bars, values):
+        pct = v / total * 100 if total else 0.0
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(total * 0.02, 0.5), f"{v} ({pct:.1f}%)", ha="center", fontsize=9)
 
 
 def _plot_has_defect_matrix(ax, section: dict) -> None:
@@ -731,24 +836,29 @@ def _plot_headline_numbers(ax, report: dict) -> None:
 
 def render_graphs(report: dict, output_path: Path) -> None:
     """One-image dashboard, deterministic and AI-free, built straight from
-    the same evaluate() results as the text report."""
-    fig, axes = plt.subplots(3, 2, figsize=(14, 16))
+    the same evaluate() results as the text report. Image format is
+    inferred from output_path's extension (the_invigilator.py passes
+    .jpg; the_coach.py passes .png) so the bytes always match the name."""
+    fig, axes = plt.subplots(4, 2, figsize=(14, 21))
     fig.suptitle(f"Pipeline Report Card — {report['evaluated_at']}", fontsize=14, fontweight="bold")
 
     _plot_accuracy_bar(axes[0][0], report)
     _plot_confusion_heatmap(axes[0][1], report["category"], "Category confusion matrix")
     _plot_confusion_heatmap(axes[1][0], report["status"], "Status confusion matrix")
-    _plot_per_label_f1(axes[1][1], report["category"], "Category F1 by label (worst to best)")
+    _plot_confusion_heatmap(axes[1][1], report["review_reason"], "Review reason confusion matrix")
     _plot_has_defect_matrix(axes[2][0], report["has_defect"])
-    _plot_headline_numbers(axes[2][1], report)
+    _plot_defect_fields_correct_wrong(axes[2][1], report["defect_fields"])
+    _plot_headline_numbers(axes[3][0], report)
+    axes[3][1].axis("off")
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, format="jpg", dpi=150)
+    fig.savefig(output_path, format=output_path.suffix.lstrip(".") or "jpg", dpi=150)
     plt.close(fig)
 
 
 def main():
+    print(f"Active LLM: {_llm_info_line()}")
     ground_truth = _load_ground_truth()
     inbox = Inbox("supabase")
     submission = _load_submission(inbox)

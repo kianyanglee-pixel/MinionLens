@@ -39,6 +39,12 @@ def to_kg(value, unit) -> float | None:
     if factor is None:
         return None
     try:
-        return float(value) * factor
+        # Extracted weights are often thousands-comma-formatted as written in
+        # the source document (e.g. "135,126") — float() rejects that as-is,
+        # which silently turned a real, correctly-extracted weight into a
+        # missing comparison (confirmed via a real email_025 trace: both SI
+        # and BL had the identical "135,126"/"KG" value, yet to_kg() returned
+        # None for both, so the field never got compared at all).
+        return float(str(value).replace(",", "").strip()) * factor
     except (TypeError, ValueError):
         return None

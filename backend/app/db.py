@@ -46,18 +46,29 @@ def list_runs() -> list:
 
 
 # -- emails ---------------------------------------------------------------
+# Keyed on (email_id, run_id), not email_id alone: reprocessing an email in
+# a later run adds a new row instead of overwriting the old one, so history
+# across runs survives. get_email_row()/update_email_resolution() only take
+# email_id (matching how routes.py already calls them) and resolve that to
+# the most recent row for that email, by processed_at.
 
 def upsert_email_row(row: dict):
-    _supabase().table("emails").upsert(row, on_conflict="email_id").execute()
+    _supabase().table("emails").upsert(row, on_conflict="email_id,run_id").execute()
 
 
 def get_email_row(email_id: str):
-    res = _supabase().table("emails").select("*").eq("email_id", email_id).execute()
+    res = (
+        _supabase().table("emails").select("*").eq("email_id", email_id)
+        .order("processed_at", desc=True).limit(1).execute()
+    )
     return res.data[0] if res.data else None
 
 
 def update_email_resolution(email_id: str, **fields):
-    _supabase().table("emails").update(fields).eq("email_id", email_id).execute()
+    latest = get_email_row(email_id)
+    if latest is None:
+        return
+    _supabase().table("emails").update(fields).eq("email_id", email_id).eq("run_id", latest["run_id"]).execute()
 
 
 def list_run_emails(run_id: str) -> list:

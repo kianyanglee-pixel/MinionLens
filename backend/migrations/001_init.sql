@@ -10,8 +10,15 @@ create table if not exists runs (
     needs_review_count  integer
 );
 
+-- email_id alone is NOT the key: the same email can appear once per run
+-- (rerunning a batch must not overwrite the previous run's row for it, so
+-- history survives). processed_at is listed first purely so it's the
+-- leftmost/eyeballed column in the Supabase table view — it is NOT part
+-- of the key.
 create table if not exists emails (
-    email_id                   text primary key,
+    processed_at                timestamptz,
+    email_id                    text,
+    run_id                       text references runs(run_id),
     category                   text not null check (category in
         ('BL_COMPARISON', 'SI_REQUEST', 'INVOICE_QUERY', 'GENERAL', 'SPAM')),
     automated_status            text check (automated_status in ('OK', 'MISMATCH', 'NEEDS_REVIEW')),
@@ -24,16 +31,17 @@ create table if not exists emails (
     defect_fields                jsonb not null default '[]',
     awaiting_sender_response     boolean not null default false,
     is_processing_failure        boolean not null default false,
-    run_id                       text references runs(run_id),
-    processed_at                 timestamptz,
-    trace                        jsonb
+    trace                        jsonb,
+    primary key (email_id, run_id)
 );
 
 create index if not exists emails_run_id_idx on emails(run_id);
 
+-- email_id here has no foreign key: emails' key is now (email_id, run_id),
+-- and a plain email_id is no longer guaranteed unique on its own.
 create table if not exists review_audit_log (
     id                bigserial primary key,
-    email_id          text not null references emails(email_id),
+    email_id          text not null,
     escalated_at      timestamptz,
     review_reason     text,
     automated_result  text,
