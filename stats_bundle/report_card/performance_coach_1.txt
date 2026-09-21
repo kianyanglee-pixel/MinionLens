@@ -1,0 +1,174 @@
+COACH RUN — N=20 email(s) processed before stopping (requested limit of 20)
+Graded against only these 20 email(s) out of the 520-email answer key, so coverage below reads against that subset, not the full key.
+
+======================================================================
+THE INVIGILATOR — Pipeline Report Card
+Evaluated at: 2026-09-21T05:22:31.106673+00:00
+AI recommendations powered by: Ollama (local) — model: llama3.1:8b
+======================================================================
+
+Emails in answer key:     20
+Emails in submission:     20
+Emails actually graded:   20 (100.0% coverage)
+  -> Percent of our answer-key emails that the pipeline actually produced a result for.
+Missing from submission: none
+Extra in submission, not in answer key: none
+
+----------------------------------------------------------------------
+CATEGORY — what type of email it thought this was
+(BL_COMPARISON / SI_REQUEST / INVOICE_QUERY / GENERAL / SPAM)
+----------------------------------------------------------------------
+
+Accuracy: 100.0% (20/20 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 1.0
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  BL_COMPARISON        precision 1.00   recall 1.00   f1 1.00   (9 in answer key)
+  GENERAL              precision 1.00   recall 1.00   f1 1.00   (2 in answer key)
+  INVOICE_QUERY        precision 1.00   recall 1.00   f1 1.00   (3 in answer key)
+  SI_REQUEST           precision 1.00   recall 1.00   f1 1.00   (5 in answer key)
+  SPAM                 precision 1.00   recall 1.00   f1 1.00   (1 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual BL_COMPARISON        -> predicted: BL_COMPARISON=9
+  actual GENERAL              -> predicted: GENERAL=2
+  actual INVOICE_QUERY        -> predicted: INVOICE_QUERY=3
+  actual SI_REQUEST           -> predicted: SI_REQUEST=5
+  actual SPAM                 -> predicted: SPAM=1
+
+----------------------------------------------------------------------
+STATUS — the overall verdict on the shipment documents
+(OK / MISMATCH / NEEDS_REVIEW)
+----------------------------------------------------------------------
+
+Accuracy: 20.0% (4/20 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 0.25
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  MISMATCH             precision 0.67   recall 1.00   f1 0.80   (2 in answer key)
+  NEEDS_REVIEW         precision 0.00   recall 0.00   f1 0.00   (0 in answer key)
+  OK                   precision 1.00   recall 0.11   f1 0.20   (18 in answer key)
+  null                 precision 0.00   recall 0.00   f1 0.00   (0 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual MISMATCH             -> predicted: MISMATCH=2
+  actual NEEDS_REVIEW         -> predicted: (nothing)
+  actual OK                   -> predicted: MISMATCH=1, NEEDS_REVIEW=4, OK=2, null=11
+  actual null                 -> predicted: (nothing)
+
+----------------------------------------------------------------------
+REVIEW_REASON — why it asked a human to take a look
+(only set when status is NEEDS_REVIEW)
+----------------------------------------------------------------------
+
+Accuracy: 80.0% (16/20 correct)
+  -> How often the pipeline's answer exactly matched the correct one, out of every email checked.
+Macro-F1: 0.4445
+  -> One overall score that treats every label fairly, so rare labels can't hide behind common ones.
+
+Per-label breakdown (For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall).):
+  missing_attachment   precision 0.00   recall 0.00   f1 0.00   (0 in answer key)
+  null                 precision 1.00   recall 0.80   f1 0.89   (20 in answer key)
+
+Confusion matrix (Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which.):
+  actual missing_attachment   -> predicted: (nothing)
+  actual null                 -> predicted: missing_attachment=4, null=16
+
+----------------------------------------------------------------------
+DEFECT_FIELDS — which specific fields it flagged as broken
+----------------------------------------------------------------------
+
+Exact-match accuracy: 95.0%
+  -> How often it flagged the exact right set of broken fields — nothing missing, nothing extra.
+Mean Jaccard overlap: 0.95
+  -> On average, how much its flagged fields overlapped with the truly broken ones — partial credit allowed.
+
+Per-field breakdown (For each field name: how reliably it gets correctly flagged as broken, across every email.):
+  consignee            precision 1.00   recall 1.00
+  notify_party         precision 1.00   recall 1.00
+  port_of_discharge    precision 1.00   recall 1.00
+  shipper              precision 0.00   recall 0.00
+
+----------------------------------------------------------------------
+HAS_DEFECT — yes/no, did it think this shipment had a problem
+----------------------------------------------------------------------
+
+Accuracy: 95.0%
+  -> How often 'has a defect or not' matched the real answer, out of every email checked.
+Precision: 0.6667
+  -> When it raised a defect flag, how often that flag turned out to be correct.
+Recall: 1.0
+  -> Out of every email that truly had a defect, how many it actually caught.
+F1: 0.8
+  -> One score balancing precision and recall together, so neither can be gamed alone.
+Cohen's Kappa: 0.7727
+  -> How much better than random guessing this is — 0 means pure luck, 1 means perfect.
+
+Confusion matrix (Splits results into caught defects, false alarms, missed defects, and correctly cleared emails.):
+  caught defects (true positive):  2
+  false alarms (false positive):   1
+  correctly cleared (true negative): 17
+  missed defects (false negative): 0
+
+======================================================================
+OVERALL SUMMARY
+======================================================================
+
+Row-level exact match: 20.0% (4/20)
+  -> Percent of emails where every single field was predicted correctly, not just one or two.
+Processing-failure rate: 0.0% (0 emails)
+  -> Percent of emails the pipeline itself choked on — a system hiccup, not a wrong content guess.
+Coverage: 100.0%
+  -> Percent of our answer-key emails that the pipeline actually produced a result for.
+======================================================================
+
+======================================================================
+MISTAKES
+======================================================================
+
+CATEGORY MISTAKES (0 total):
+  no mistakes — every email in this field matched the answer key.
+
+STATUS MISTAKES (16 total):
+  email_002: actual=OK, predicted=null
+  email_003: actual=OK, predicted=NEEDS_REVIEW
+  email_005: actual=OK, predicted=MISMATCH
+  email_006: actual=OK, predicted=NEEDS_REVIEW
+  email_007: actual=OK, predicted=null
+  email_008: actual=OK, predicted=null
+  email_010: actual=OK, predicted=null
+  email_011: actual=OK, predicted=null
+  email_012: actual=OK, predicted=null
+  email_014: actual=OK, predicted=null
+  email_015: actual=OK, predicted=null
+  email_016: actual=OK, predicted=NEEDS_REVIEW
+  email_017: actual=OK, predicted=null
+  email_018: actual=OK, predicted=NEEDS_REVIEW
+  email_019: actual=OK, predicted=null
+  email_020: actual=OK, predicted=null
+
+REVIEW_REASON MISTAKES (4 total):
+  email_003: actual=null, predicted=missing_attachment
+  email_006: actual=null, predicted=missing_attachment
+  email_016: actual=null, predicted=missing_attachment
+  email_018: actual=null, predicted=missing_attachment
+
+DEFECT_FIELDS MISTAKES (1 total):
+  email_005: actual=[], predicted=['shipper'] (missing=[], extra=['shipper'])
+
+HAS_DEFECT MISTAKES (1 total):
+  email_005: actual=False, predicted=True
+
+======================================================================
+AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying.
+======================================================================
+
+Hardcoded harness changes to consider (evaluator.py logic, no prompt involved):
+  (none suggested)
+
+Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py):
+  (none suggested)

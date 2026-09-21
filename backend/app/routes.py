@@ -7,11 +7,11 @@ from pathlib import Path
 # those modules in. (Doesn't touch classifier.py/extractor.py/evaluator.py/llm.py.)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, abort, jsonify, request
 
 from loader import Inbox
 from app.classifier import classify_email
-from app.extractor import extract_fields
+from app.extractor import extract_field_pair
 from app.evaluator import compare_documents
 from app.ingest import(
     INBOX_DIR,
@@ -25,6 +25,7 @@ from app.ingest import(
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 DOC_COMPARISON_CATEGORY = "BL_COMPARISON"
+STATUS_VALUES = ("OK", "MISMATCH", "NEEDS_REVIEW")
 
 
 def _attachment_role(att_path):
@@ -37,16 +38,38 @@ def _attachment_role(att_path):
     return None
 
 
-def _missing_attachment_result(missing_role):
+def _missing_attachment_result(si_path, bl_path):
     """Same shape evaluator.compare_documents() returns, for the one case it
-    can't handle itself: one of the two documents was never attached at all."""
+    can't handle itself: one of the two documents was never attached at all.
+    Uses the PRD's exact 4-value review_reason enum (missing_attachment) —
+    which side was missing is carried in si_path/bl_path, not the enum."""
     return {
         "status": "NEEDS_REVIEW",
-        "review_reason": f"missing_{missing_role.lower()}_attachment",
+        "review_reason": "missing_attachment",
+        "processing_failure": False,
         "has_defect": False,
         "defect_fields": [],
         "field_comparisons": {},
+        "si_path": si_path,
+        "bl_path": bl_path,
     }
+
+
+def _load_emails(inbox, limit=None, email_id=None):
+    """inbox.emails() lists the whole inbox, then downloads every single
+    email JSON from Storage one at a time — fine for a full batch run, way
+    too slow for a limit-bounded smoke test. When limited, list filenames
+    only (cheap) and download just the first N. email_id downloads just
+    that one email, skipping the listing entirely."""
+    if email_id is not None:
+        return [inbox.get(email_id)]
+
+    if limit is None:
+        return inbox.emails()
+
+    files = inbox._supabase_list("inbox")
+    names = sorted(f["name"] for f in files if f["name"].startswith("email_"))[:limit]
+    return [inbox.get(name[:-len(".json")]) for name in names]
 
 
 def process_email(inbox, email):
@@ -63,13 +86,17 @@ def process_email(inbox, email):
     bl_path = next((p for p in attachments if _attachment_role(p) == "BL"), None)
 
     if not si_path or not bl_path:
-        comparison = _missing_attachment_result("SI" if not si_path else "BL")
+        comparison = _missing_attachment_result(si_path, bl_path)
     else:
-        si_result = extract_fields(inbox, si_path)
-        bl_result = extract_fields(inbox, bl_path)
-        comparison = compare_documents(si_result, bl_result)
+        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
+        comparison = {**compare_documents(si_result, bl_result), "si_path": si_path, "bl_path": bl_path}
 
     return {**classification, "comparison": comparison}
+
+
+@bp.errorhandler(404)
+def _not_found(err):
+    return jsonify(error=str(err.description or "not found")), 404
 
 
 @bp.route("/hello")
@@ -81,12 +108,6 @@ def hello():
 def list_emails():
     inbox = Inbox("supabase")
     return jsonify(inbox.emails())
-
-
-@bp.route("/emails/<email_id>")
-def get_email(email_id):
-    inbox = Inbox("supabase")
-    return jsonify(inbox.get(email_id))
 
 
 @bp.route("/emails/<email_id>/process")
