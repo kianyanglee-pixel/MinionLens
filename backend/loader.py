@@ -55,10 +55,13 @@ class Inbox:
         return self.read_bytes(att_path).decode(encoding, errors="replace")
 
     # -- submission ------------------------------------------------------
-    def submit(self, submission):
+    def submit(self, submission, filename="submission.json"):
         """Upload a submission as a JSON file under submissions/ in the
-        same bucket and return the storage path."""
-        path = "submissions/submission.json"
+        same bucket and return the storage path. filename defaults to the
+        frozen graded snapshot (submission.json); pass a different name
+        (e.g. the_coach.py's submission_coach_{x}.json) to upload alongside
+        it without ever overwriting it."""
+        path = f"submissions/{filename}"
         data = json.dumps(submission, indent=2).encode()
         self._supabase().storage.from_(self.bucket).upload(
             path, data,

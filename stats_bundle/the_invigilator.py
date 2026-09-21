@@ -756,7 +756,9 @@ def _plot_headline_numbers(ax, report: dict) -> None:
 
 def render_graphs(report: dict, output_path: Path) -> None:
     """One-image dashboard, deterministic and AI-free, built straight from
-    the same evaluate() results as the text report."""
+    the same evaluate() results as the text report. Image format is
+    inferred from output_path's extension (the_invigilator.py passes
+    .jpg; the_coach.py passes .png) so the bytes always match the name."""
     fig, axes = plt.subplots(3, 2, figsize=(14, 16))
     fig.suptitle(f"Pipeline Report Card — {report['evaluated_at']}", fontsize=14, fontweight="bold")
 
@@ -769,7 +771,7 @@ def render_graphs(report: dict, output_path: Path) -> None:
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, format="jpg", dpi=150)
+    fig.savefig(output_path, format=output_path.suffix.lstrip(".") or "jpg", dpi=150)
     plt.close(fig)
 
 
