@@ -3,6 +3,7 @@ import re
 from rapidfuzz import fuzz
 
 from .llm import ask_json
+from .unit_normalizer import to_kg
 
 FIELD_LABELS = {
     "shipper": "Shipper",
@@ -15,14 +16,19 @@ FIELD_LABELS = {
 }
 FIELD_NAMES = tuple(FIELD_LABELS)
 
-NUMERIC_FIELDS = {"container_count", "gross_weight_kg"}
 FUZZY_MATCH_THRESHOLD = 90
-FUZZY_AMBIGUOUS_FLOOR = 70
-WEIGHT_TOLERANCE_KG = 1.0
+LITERAL_MATCH_THRESHOLD = 90
+WEIGHT_TOLERANCE_PCT = 0.005  # +/-0.5%, absorbs unit-conversion rounding (§2.4-E)
 
-SEMANTIC_SYSTEM_PROMPT = """You check whether two short shipping-document values refer to the same real-world thing
-(e.g. a company name written in short form vs full form, or the same value written in different languages).
-Respond with strict JSON: {"same": true|false, "reason": "<one short sentence>"}."""
+# The sample dataset always writes container count as "N x SIZE'TYPE" (e.g.
+# "6 x 40'HC") — this pattern lets the Literal Match Check resolve that
+# specific transformation itself, permanently graduating the field off the
+# Grounding Verifier (§2.4-B).
+CONTAINER_COUNT_PATTERN = re.compile(r"(\d+)\s*x\s*\d+'?\s*[a-z]{1,4}\b", re.IGNORECASE)
+
+GROUNDING_SYSTEM_PROMPT = """You check whether an extracted value is actually attributable to a source document's text
+— i.e. whether it's a normalized or converted form of something the text says, not an invented or hallucinated value.
+Respond with strict JSON: {"verdict": "confirmed"|"not_found"|"ambiguous", "reason": "<one short sentence>"}."""
 
 
 def _normalize_text(value) -> str:
@@ -36,36 +42,116 @@ def _parse_number(value):
     return float(match.group()) if match else None
 
 
-def _compare_numeric(field: str, si_value, bl_value) -> bool:
-    si_num, bl_num = _parse_number(si_value), _parse_number(bl_value)
-    if si_num is None or bl_num is None:
+def _weight_parts(value):
+    """gross_weight_kg is {"value": <number>, "unit": "<str>"} from the
+    extractor (§2.4-E). Tolerate a bare number for robustness against a
+    malformed extraction — to_kg() will then correctly return None (no
+    unit info), routing it to review rather than guessing kg."""
+    if isinstance(value, dict):
+        return value.get("value"), value.get("unit")
+    return value, None
+
+
+def _literal_match(value, source_text) -> bool:
+    """Literal Match Check ('the clerk'): does an extracted value appear
+    verbatim, or near-verbatim, in the document it was extracted from?
+    Deterministic, free, no LLM — runs first, on every text field (§2.4-B)."""
+    value_norm = _normalize_text(value)
+    text_norm = _normalize_text(source_text)
+    if not value_norm or not text_norm:
         return False
-    if field == "gross_weight_kg":
-        return abs(si_num - bl_num) <= WEIGHT_TOLERANCE_KG
-    return si_num == bl_num
+    if value_norm in text_norm:
+        return True
+
+    window = len(value_norm)
+    if window > len(text_norm):
+        return False
+    step = max(1, window // 4)
+    return any(
+        fuzz.ratio(value_norm, text_norm[i:i + window]) >= LITERAL_MATCH_THRESHOLD
+        for i in range(0, len(text_norm) - window + 1, step)
+    )
+
+
+def _grounding_verify(value, source_text) -> str:
+    """Grounding Verifier: LLM call, only for a value the Literal Match Check
+    couldn't resolve — confirms whether a normalized/converted value is still
+    attributable to its source document (§2.4-B). Never compares SI to BL —
+    that judgment belongs to the deterministic Comparator below."""
+    verdict = ask_json(
+        GROUNDING_SYSTEM_PROMPT,
+        f"Extracted value: {value}\n\nSource document text:\n{source_text}",
+    )
+    result = verdict.get("verdict")
+    return result if result in ("confirmed", "not_found", "ambiguous") else "ambiguous"
+
+
+def _grounded(value, source_text) -> bool:
+    """Is a single extracted value trustworthy: found literally in its own
+    source text, or confirmed by the Grounding Verifier when it isn't."""
+    if value is None:
+        return False
+    if _literal_match(value, source_text):
+        return True
+    return _grounding_verify(value, source_text) == "confirmed"
+
+
+def _parse_container_count(value, source_text):
+    """Confirms an extracted container count against the source text's own
+    'N x SIZE'TYPE' wording — deterministic, no LLM. Returns the count if
+    confirmed, else None (low-confidence, no LLM fallback for this field —
+    it's fully graduated off the Grounding Verifier, §2.4-B)."""
+    count = _parse_number(value)
+    if count is None:
+        return None
+    text_norm = _normalize_text(source_text)
+    for match in CONTAINER_COUNT_PATTERN.finditer(text_norm):
+        if int(match.group(1)) == int(count):
+            return int(count)
+    return None
+
+
+def _compare_container_count(si_value, bl_value, si_text, bl_text):
+    si_count = _parse_container_count(si_value, si_text)
+    bl_count = _parse_container_count(bl_value, bl_text)
+    if si_count is None or bl_count is None:
+        return None
+    return si_count == bl_count
+
+
+def _compare_weight(si_value, bl_value):
+    """Unit Normalizer + weight comparison (§2.4-E) — deterministic, no LLM.
+    Converts both sides to kg before comparing, with a relative tolerance to
+    absorb unit-conversion rounding rather than exact-match false-flagging.
+    No identifiable unit on either side is low-confidence, not a silent kg
+    assumption — routes to review like any other ungrounded field."""
+    si_kg = to_kg(*_weight_parts(si_value))
+    bl_kg = to_kg(*_weight_parts(bl_value))
+    if si_kg is None or bl_kg is None:
+        return None
+    tolerance = WEIGHT_TOLERANCE_PCT * max(abs(si_kg), abs(bl_kg))
+    return abs(si_kg - bl_kg) <= tolerance
 
 
 def _compare_text(si_value, bl_value) -> bool:
+    """Comparator: deterministic diff only, no LLM (§2.4-A) — exact match
+    after normalization, or a high-confidence fuzzy match to absorb
+    whitespace/punctuation noise, never a semantic 'are these the same
+    entity' judgment call (a real value mismatch, like the SI/BL consignee
+    example in the PRD, must be flagged, not explained away)."""
     si_norm, bl_norm = _normalize_text(si_value), _normalize_text(bl_value)
     if not si_norm or not bl_norm:
         return False
     if si_norm == bl_norm:
         return True
-
-    score = fuzz.token_sort_ratio(si_norm, bl_norm)
-    if score >= FUZZY_MATCH_THRESHOLD:
-        return True
-    if score < FUZZY_AMBIGUOUS_FLOOR:
-        return False
-
-    verdict = ask_json(SEMANTIC_SYSTEM_PROMPT, f"Value A: {si_value}\nValue B: {bl_value}")
-    return bool(verdict.get("same"))
+    return fuzz.token_sort_ratio(si_norm, bl_norm) >= FUZZY_MATCH_THRESHOLD
 
 
 def _needs_review(reason: str, field_comparisons=None) -> dict:
     return {
         "status": "NEEDS_REVIEW",
         "review_reason": reason,
+        "processing_failure": False,
         "has_defect": False,
         "defect_fields": [],
         "field_comparisons": field_comparisons or {},
@@ -73,11 +159,27 @@ def _needs_review(reason: str, field_comparisons=None) -> dict:
 
 
 def compare_documents(si_result: dict, bl_result: dict) -> dict:
+    if si_result.get("processing_failure") or bl_result.get("processing_failure"):
+        # A system fault (LLM call failed after retries, a parser threw) —
+        # kept visibly separate from the four content review_reason values,
+        # no document to view, no judgment to make, just a retry (§2.4-F).
+        return {
+            "status": "NEEDS_REVIEW",
+            "review_reason": None,
+            "processing_failure": True,
+            "has_defect": False,
+            "defect_fields": [],
+            "field_comparisons": {},
+        }
+
     if not si_result["ok"] or not bl_result["ok"]:
         return _needs_review("unreadable")
 
     if sum(si_result["found"].values()) == 0 or sum(bl_result["found"].values()) == 0:
         return _needs_review("wrong_doc_type")
+
+    si_text = si_result.get("text", "")
+    bl_text = bl_result.get("text", "")
 
     field_comparisons = {}
     for name in FIELD_NAMES:
@@ -87,8 +189,15 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
 
         if not both_found:
             match = None
-        elif name in NUMERIC_FIELDS:
-            match = _compare_numeric(name, si_value, bl_value)
+        elif name == "container_count":
+            match = _compare_container_count(si_value, bl_value, si_text, bl_text)
+        elif name == "gross_weight_kg":
+            match = _compare_weight(si_value, bl_value)
+        elif not _grounded(si_value, si_text) or not _grounded(bl_value, bl_text):
+            # Neither the Literal Match Check nor the Grounding Verifier
+            # could confirm this value is attributable to its own source —
+            # low-confidence, route to review rather than guess (§2.4-B).
+            match = None
         else:
             match = _compare_text(si_value, bl_value)
 
@@ -106,6 +215,7 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
     return {
         "status": "MISMATCH" if defect_fields else "OK",
         "review_reason": None,
+        "processing_failure": False,
         "has_defect": bool(defect_fields),
         "defect_fields": defect_fields,
         "field_comparisons": field_comparisons,

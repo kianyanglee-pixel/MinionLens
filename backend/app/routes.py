@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
@@ -11,7 +10,7 @@ from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from loader import Inbox
 from app.classifier import classify_email
-from app.extractor import extract_fields
+from app.extractor import extract_field_pair, extract_fields
 from app.evaluator import compare_documents
 from app.ingest import (
     BASE_DATA_DIR,
@@ -43,13 +42,16 @@ def _attachment_role(att_path):
         return "BL"
     return None
 
-def _missing_attachment_result(missing_role):
+def _missing_attachment_result(missing_role, si_path=None, bl_path=None):
     return {
         "status": "NEEDS_REVIEW",
-        "review_reason": f"missing_{missing_role.lower()}_attachment",
+        "review_reason": "missing_value",
+        "processing_failure": False,
         "has_defect": False,
         "defect_fields": [],
         "field_comparisons": {},
+        "si_path": si_path,
+        "bl_path": bl_path,
     }
 
 def process_email(inbox, email):
@@ -61,7 +63,8 @@ def process_email(inbox, email):
             "email_id": email.get("email_id"),
             "category": category,
             "classification": classification,
-            "comparison": None
+            "comparison": None,
+            "processing_failure": classification.get("processing_failure", False)
         }
 
     attachments = email.get("attachments", [])
@@ -69,12 +72,10 @@ def process_email(inbox, email):
     bl_path = next((p for p in attachments if _attachment_role(p) == "BL"), None)
 
     if not si_path or not bl_path:
-        comparison = _missing_attachment_result("SI" if not si_path else "BL")
-        comparison["si_path"] = si_path
-        comparison["bl_path"] = bl_path
+        comparison = _missing_attachment_result("SI" if not si_path else "BL", si_path, bl_path)
     else:
-        si_result = extract_fields(inbox, si_path)
-        bl_result = extract_fields(inbox, bl_path)
+        # Use teammate's optimized single-prompt pair extractor
+        si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
         comparison = compare_documents(si_result, bl_result)
         comparison["si_path"] = si_path
         comparison["bl_path"] = bl_path
@@ -83,18 +84,20 @@ def process_email(inbox, email):
         "email_id": email.get("email_id"),
         "category": category,
         "classification": classification,
-        "comparison": comparison
+        "comparison": comparison,
+        "processing_failure": classification.get("processing_failure", False) or (comparison.get("processing_failure", False) if comparison else False)
     }
 
 def _process_and_save_worker(inbox, email_data, run_id: str):
-    """Worker task executed concurrently for each email."""
-    email_id = str(email_data.get("email_id"))
-    email_name = f"{email_id}.json"
+    raw_id = str(email_data.get("email_id") or "email_unknown")
+    email_name = raw_id.replace(".json", "")
+    email_id = f"{run_id}_{email_name}"
 
     result = process_email(inbox, email_data)
     category = result.get("category", "GENERAL")
     classification = result.get("classification", {})
     comparison = result.get("comparison")
+    is_processing_failure = result.get("processing_failure", False)
 
     is_spam = category == "SPAM"
     is_mismatch = False
@@ -153,8 +156,8 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
         "current_review_reason": automated_review,
         "has_defect": has_defect,
         "defect_fields": defect_fields,
-        "awaiting_sender_response": False,
-        "is_processing_failure": False,
+        "awaiting_sender_response": (has_defect or automated_status == "NEEDS_REVIEW"),
+        "is_processing_failure": is_processing_failure,
         "run_id": run_id,
         "processed_at": now,
         "trace": trace_payload
@@ -163,19 +166,19 @@ def _process_and_save_worker(inbox, email_data, run_id: str):
     audit_row = None
     if has_defect or automated_status == "NEEDS_REVIEW":
         audit_row = {
+            "run_id": run_id,
             "email_id": email_id,
             "escalated_at": now,
-            "review_reason": automated_review or "Document discrepancy detected",
+            "review_reason": automated_review or "missing_value",
             "automated_result": automated_status,
-            "action": "ESCALATED",
+            "action": "awaiting_sender_response",  # Pass CHECK constraint
             "defect_fields": defect_fields,
         }
 
-    # Save immediately to Supabase
     save_single_processed_email(email_row, audit_row)
 
     return {
-        "email_id": email_id,
+        "email_id": email_name,
         "status": automated_status,
         "is_mismatch": is_mismatch,
         "is_needs_review": is_needs_review,
@@ -244,6 +247,28 @@ def ingest_batch():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # ==========================================
+# Attachment Inspection Route
+# ==========================================
+@bp.route("/attachments/content", methods=["GET"])
+def get_attachment_content():
+    path = request.args.get("path")
+    run_id = request.args.get("run_id")
+    if not path:
+        return jsonify({"status": "error", "message": "path is required"}), 400
+
+    try:
+        if run_id:
+            batch_path = BASE_DATA_DIR / run_id
+            inbox = Inbox(str(batch_path))
+        else:
+            inbox = Inbox("supabase")
+
+        content = inbox.read_text(path)
+        return jsonify({"status": "success", "content": content})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+
+# ==========================================
 # Parallel Streaming Verification Route
 # ==========================================
 @bp.route("/stream-process", methods=["GET"])
@@ -269,8 +294,8 @@ def stream_batch_process():
         }
         completed_count = 0
 
-        # Concurrent Thread Pool (6 concurrent workers)
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        # Max 3 workers to prevent socket timeouts on Windows
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
                 executor.submit(_process_and_save_worker, inbox, email, run_id): email
                 for email in emails
@@ -305,7 +330,7 @@ def stream_batch_process():
     )
 
 # ==========================================
-# Run Details and Resolution Endpoints
+# Run Details and Review Queue Endpoints
 # ==========================================
 @bp.route("/runs", methods=["GET"])
 def list_all_runs():

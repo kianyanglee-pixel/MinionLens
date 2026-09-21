@@ -108,7 +108,7 @@ class Inbox:
         return self.read_bytes(att_path).decode(encoding, errors="replace")
 
     # -- submission ------------------------------------------------------
-    def submit(self, submission):
+    def submit(self, submission, filename="submission.json"):
         """Upload a submission as a JSON file under submissions/ in the
         same bucket and return the storage path."""
         if not self.is_supabase:
