@@ -1,11 +1,12 @@
 """the_coach.py — the_invigilator.py's sibling for open-ended smoke runs.
 
-Run: `python the_coach.py` (no arguments). Processes emails from the
-Supabase inbox one at a time, in the same order and through the same
-pipeline routes.py's create_run() uses (classify_email -> extract/compare
-for BL_COMPARISON emails -> report.build_report()), and simply keeps going
-until either the inbox runs out or a call raises (Ollama/API quota or
-rate-limit exhausted, after llm.py's own retries) — whichever comes first.
+Run: `python the_coach.py` (no arguments) or `python the_coach.py N` (an
+optional email cap). Processes emails from the Supabase inbox one at a
+time, in the same order and through the same pipeline routes.py's
+create_run() uses (classify_email -> extract/compare for BL_COMPARISON
+emails -> report.build_report()), and keeps going until the FIRST of:
+inbox exhausted, a call raises (Ollama/API quota or rate-limit exhausted,
+after llm.py's own retries), or (if given) N emails have been processed.
 Whatever was successfully processed before that is this run's N.
 
 The resulting submission is uploaded to Supabase as
@@ -24,6 +25,7 @@ Writes stats_bundle/report_card/performance_coach_{x}.txt and
 stats_bundle/summary_graphs/graph_coach_{x}.png (same x for both, and for
 the uploaded submission_coach_{x}.json).
 """
+import itertools
 import sys
 from pathlib import Path
 
@@ -40,6 +42,12 @@ load_dotenv(BACKEND_DIR / ".env")
 from loader import Inbox  # noqa: E402
 from app.report import build_report  # noqa: E402
 from app.routes import process_email  # noqa: E402
+from app import db  # noqa: E402
+from app.classifier import classify_email  # noqa: E402
+from app.evaluator import compare_documents  # noqa: E402
+from app.extractor import extract_field_pair, extract_fields  # noqa: E402
+from app.llm import ask_json, client, DEFAULT_MODEL  # noqa: E402
+from app.unit_normalizer import to_kg  # noqa: E402
 
 from the_invigilator import (  # noqa: E402
     _llm_info_line,
@@ -70,13 +78,18 @@ def _next_index(inbox: Inbox) -> int:
     return x
 
 
-def _run_until_stopped(inbox: Inbox, run_id: str) -> dict:
-    """Processes emails one at a time, in inbox order, until either the
-    inbox is exhausted or process_email() raises (typically an LLM
-    quota/rate-limit error surfacing after llm.py's own retries are spent).
+def _run_until_stopped(inbox: Inbox, run_id: str, limit: int = None) -> dict:
+    """Processes emails one at a time, in inbox order, stopping at the
+    first of: the inbox running out, process_email() raising (typically an
+    LLM quota/rate-limit error surfacing after llm.py's own retries are
+    spent), or `limit` emails processed (if given — None means no cap).
     Returns the submission dict built from whatever succeeded."""
     submission = {}
-    for email in inbox.emails():
+    emails = inbox.emails()
+    if limit is not None:
+        emails = itertools.islice(emails, limit)
+
+    for email in emails:
         try:
             result = process_email(inbox, email)
         except Exception as exc:
@@ -85,16 +98,24 @@ def _run_until_stopped(inbox: Inbox, run_id: str) -> dict:
         submission_entry, _email_row = build_report(result, run_id)
         submission[result["email_id"]] = submission_entry
     else:
-        print(f"Processed the full inbox ({len(submission)} email(s)) without hitting an error.")
+        reached = f"the requested {limit} email(s)" if limit is not None else "the full inbox"
+        print(f"Processed {reached} ({len(submission)} email(s)) without hitting an error.")
     return submission
 
 
 def main():
+    limit = None
+    if len(sys.argv) > 1:
+        try:
+            limit = int(sys.argv[1])
+        except ValueError:
+            print(f"Ignoring invalid argument {sys.argv[1]!r} — expected an integer N or no argument.")
+
     print(f"Active LLM: {_llm_info_line()}")
     inbox = Inbox("supabase")
     x = _next_index(inbox)
 
-    submission = _run_until_stopped(inbox, run_id=f"coach_{x}")
+    submission = _run_until_stopped(inbox, run_id=f"coach_{x}", limit=limit)
     if not submission:
         print("No emails were successfully processed — nothing to submit or grade.")
         return
@@ -112,9 +133,9 @@ def main():
     report_path = REPORT_CARD_DIR / f"performance_coach_{x}.txt"
     graph_path = SUMMARY_GRAPHS_DIR / f"graph_coach_{x}.png"
 
+    stop_reason = f"requested limit of {limit}" if limit is not None else "inbox exhausted or an API/quota error"
     header = (
-        f"COACH RUN — N={len(submission)} email(s) processed before stopping "
-        "(inbox exhausted or an API/quota error was hit)\n"
+        f"COACH RUN — N={len(submission)} email(s) processed before stopping ({stop_reason})\n"
         f"Graded against only these {len(submission)} email(s) out of the "
         f"{len(ground_truth_full)}-email answer key, so coverage below reads "
         "against that subset, not the full key.\n"
