@@ -13,7 +13,14 @@ from loader import Inbox
 from app.classifier import classify_email
 from app.extractor import extract_field_pair
 from app.evaluator import compare_documents
-from app import db, report
+from app.ingest import(
+    INBOX_DIR,
+    ATTACHMENTS_DIR,
+    sync_from_s3,
+    sync_from_gcs,
+    sync_from_gdrive_folder,
+    save_uploaded_files
+)
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -118,151 +125,52 @@ def process_all_emails():
     results = [process_email(inbox, email) for email in inbox.emails()]
     return jsonify(results)
 
+@bp.route("/ingest", methods=["POST"])
+def ingest_batch():
+    # A) Multi-part Form Data (Local Folder Upload)
+    if "inbox_files" in request.files or "attachment_files" in request.files:
+        inbox_files = request.files.getlist("inbox_files")
+        attachment_files = request.files.getlist("attachment_files")
+        
+        in_count, att_count = save_uploaded_files(inbox_files, attachment_files)
+        return jsonify({
+            "status": "success",
+            "message": f"Local files saved: {in_count} inbox emails, {att_count} attachments.",
+            "inbox_count": in_count,
+            "attachment_count": att_count
+        })
 
-@bp.route("/runs", methods=["POST"])
-def create_run():
-    """Batch job (PRD §4.7/§4.10): processes the inbox synchronously,
-    upserting each email's row (idempotent on rerun/crash-resume) and writing
-    the frozen submission.json snapshot once at the end.
+    # B) JSON Body (S3 / GCS / Google Drive)
+    data = request.get_json() or {}
+    source_type = data.get("source_type")
+    inbox_uri = data.get("inbox_uri", "")
+    attachments_uri = data.get("attachments_uri", "")
 
-    Optional ?limit=N processes only the first N emails, or ?email_id=X
-    processes just that one email — both for smoke-testing the pipeline/DB
-    wiring cheaply. Either way the run still writes DB rows (so you can
-    exercise the API), but deliberately skips submission.json: that file is
-    the frozen, graded snapshot and must never be overwritten with a partial
-    batch."""
-    inbox = Inbox("supabase")
-    run_id = db.create_run()
+    try:
+        if source_type == "cloud":
+            # Check prefix protocol (s3:// vs gs://)
+            if inbox_uri.startswith("s3://"):
+                in_count = sync_from_s3(inbox_uri, INBOX_DIR)
+                att_count = sync_from_s3(attachments_uri, ATTACHMENTS_DIR)
+            elif inbox_uri.startswith("gs://"):
+                in_count = sync_from_gcs(inbox_uri, INBOX_DIR)
+                att_count = sync_from_gcs(attachments_uri, ATTACHMENTS_DIR)
+            else:
+                return jsonify({"status": "error", "message": "Invalid cloud URI protocol"}), 400
 
-    limit = request.args.get("limit", type=int)
-    email_id = request.args.get("email_id")
-    emails = _load_emails(inbox, limit, email_id)
+        elif source_type == "drive":
+            in_count = sync_from_gdrive_folder(inbox_uri, INBOX_DIR)
+            att_count = sync_from_gdrive_folder(attachments_uri, ATTACHMENTS_DIR)
 
-    submission = {}
-    mismatch_count = 0
-    needs_review_count = 0
-    email_count = 0
+        else:
+            return jsonify({"status": "error", "message": "Unknown source_type"}), 400
 
-    for email in emails:
-        result = process_email(inbox, email)
-        submission_entry, email_row = report.build_report(result, run_id)
-        submission[result["email_id"]] = submission_entry
-        db.upsert_email_row(email_row)
+        return jsonify({
+            "status": "success",
+            "source": source_type,
+            "inbox_downloaded": in_count,
+            "attachments_downloaded": att_count
+        })
 
-        email_count += 1
-        if submission_entry["status"] == "MISMATCH":
-            mismatch_count += 1
-        elif submission_entry["status"] == "NEEDS_REVIEW":
-            needs_review_count += 1
-
-    db.finalize_run(run_id, email_count, mismatch_count, needs_review_count)
-
-    submission_written = limit is None and email_id is None
-    if submission_written:
-        inbox.submit(submission)
-
-    return jsonify(
-        run_id=run_id,
-        email_count=email_count,
-        mismatch_count=mismatch_count,
-        needs_review_count=needs_review_count,
-        submission_written=submission_written,
-    )
-
-
-@bp.route("/runs")
-def list_runs():
-    return jsonify(db.list_runs())
-
-
-@bp.route("/runs/<run_id>/emails")
-def list_run_emails(run_id):
-    return jsonify(db.list_run_emails(run_id))
-
-
-@bp.route("/emails/<email_id>")
-def get_email(email_id):
-    row = db.get_email_row(email_id)
-    if row is None:
-        abort(404, description=f"no processed email {email_id}")
-
-    inbox = Inbox("supabase")
-    email = inbox.get(email_id)
-
-    return jsonify({
-        **row,
-        "sender": email.get("from"),
-        "subject": email.get("subject"),
-        "body": email.get("body"),
-    })
-
-
-@bp.route("/emails/<email_id>/source")
-def get_email_source(email_id):
-    row = db.get_email_row(email_id)
-    if row is None:
-        abort(404, description=f"no processed email {email_id}")
-
-    inbox = Inbox("supabase")
-    comparison = (row.get("trace") or {}).get("comparison") or {}
-
-    def _read(path):
-        if not path:
-            return {"path": None, "text": "unreadable"}
-        try:
-            return {"path": path, "text": inbox.read_text(path)}
-        except Exception:
-            return {"path": path, "text": "unreadable"}
-
-    return jsonify(si=_read(comparison.get("si_path")), bl=_read(comparison.get("bl_path")))
-
-
-@bp.route("/emails/<email_id>/resolve", methods=["POST"])
-def resolve_email(email_id):
-    row = db.get_email_row(email_id)
-    if row is None:
-        abort(404, description=f"no processed email {email_id}")
-
-    body = request.get_json(silent=True) or {}
-    decision = body.get("decision")
-    awaiting = bool(body.get("awaiting_sender_response"))
-    notes = body.get("notes")
-
-    if decision and awaiting:
-        abort(400, description="decision and awaiting_sender_response are mutually exclusive")
-    if not decision and not awaiting:
-        abort(400, description="must provide either decision or awaiting_sender_response")
-    if decision and decision not in STATUS_VALUES:
-        abort(400, description=f"decision must be one of {STATUS_VALUES}")
-
-    defect_fields = body.get("defect_fields", row.get("defect_fields", []))
-
-    if decision:
-        update_fields = {
-            "current_status": decision,
-            "current_review_reason": None if decision != "NEEDS_REVIEW" else row.get("current_review_reason"),
-            "has_defect": decision == "MISMATCH",
-            "defect_fields": defect_fields if decision == "MISMATCH" else [],
-            "awaiting_sender_response": False,
-        }
-        action = "resolved"
-    else:
-        update_fields = {"awaiting_sender_response": True}
-        action = "awaiting_sender_response"
-
-    db.update_email_resolution(email_id, **update_fields)
-    db.insert_audit_log_row({
-        "email_id": email_id,
-        "run_id": row.get("run_id"),
-        "escalated_at": row.get("processed_at"),
-        "review_reason": row.get("automated_review_reason"),
-        "automated_result": row.get("automated_status"),
-        "action": action,
-        "resolved_at": report.now(),
-        "resolved_by": body.get("resolved_by", "reviewer"),
-        "human_decision": decision,
-        "defect_fields": defect_fields if decision == "MISMATCH" else [],
-        "notes": notes,
-    })
-
-    return jsonify(db.get_email_row(email_id))
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500

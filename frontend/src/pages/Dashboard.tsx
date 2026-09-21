@@ -3,9 +3,10 @@ import {
   Plus, CheckCircle2, XCircle, AlertCircle, 
   Search, ExternalLink, ShieldCheck, X, FileText,
   Ship, Compass, Activity, Clock, SlidersHorizontal,
-  Layers, Radio, Sparkles, ArrowRight
+  Layers, Radio, Sparkles, ArrowRight, UserCheck
 } from 'lucide-react';
 import { FileUpload } from '../components/FileUpload';
+import { HumanReviewPanel } from '../components/HumanReviewPanel';
 
 // Types for Document Verification
 export interface VerificationField {
@@ -65,14 +66,33 @@ const INITIAL_RECORDS: EmailRecord[] = [
     subject: 'Shipping instruction attached — PC-9902',
     category: 'document_comparison',
     status: 'unreadable',
-    statusText: 'BL unreadable',
+    statusText: 'BL unreadable (OCR noise)',
     time: '06:54',
     confidence: 'low',
     trace: [
       'LLM Classifier: Document comparison request detected',
       'Extraction Error: BL attachment unreadable or corrupted OCR image',
       'Escalated to human review queue with priority flag'
-    ]
+    ],
+    rawSiText: "SHIPPER: Pacific Overseas Corp\nCONSIGNEE: Global Imports Ltd\nPOL: Port Klang, MY\nPOD: Antwerp, BE\nCONTAINERS: 2x40HC\nWEIGHT: 19500 KGS",
+    rawBlText: "--- BL SCAN (OCR GARBLED) ---\nSHPR: Pacific Oversea???\nCNSG: Global Imprts\nPORT OF L: Port Klang\nPOD: Antwerp\nPACKAGES: [UNREADABLE SCAN]\nGROSS WT: 19500 KG"
+  },
+  {
+    id: 'UNR-1044',
+    sender: 'Oceanic Line Express',
+    subject: 'SI Draft submission for booking UNR-1044',
+    category: 'document_comparison',
+    status: 'unreadable',
+    statusText: 'SI Header Missing',
+    time: '06:40',
+    confidence: 'low',
+    trace: [
+      'LLM Classifier: Document comparison request detected',
+      'Extraction Error: Missing Shipper Tax ID and unreadable Container Manifest block',
+      'Escalated to human review queue'
+    ],
+    rawSiText: "BOOKING: UNR-1044\nSHIPPER: [BLURRED IMAGE]\nCONSIGNEE: TransWorld Logistics\nPOL: Shanghai, CN\nPOD: Los Angeles, US\nCONTAINER: 5x40HQ\nWEIGHT: 45000 KGS",
+    rawBlText: "SHIPPER: Ocean Star Trading Co.\nCONSIGNEE: TransWorld Logistics\nPOL: Shanghai, CN\nPOD: Los Angeles, US\nCONTAINER: 5x40HQ\nWEIGHT: 45000 KGS"
   },
   {
     id: 'MRD-6602',
@@ -125,6 +145,7 @@ export const Dashboard: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [showSourceViewer, setShowSourceViewer] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const selectedRecord = records.find(r => r.id === selectedId) || records[0];
 
@@ -135,6 +156,26 @@ export const Dashboard: React.FC = () => {
     review: records.filter(r => r.status === 'unreadable').length,
     clear: records.filter(r => r.status === 'clear' && r.category === 'document_comparison').length,
     spam: records.filter(r => r.category === 'spam').length,
+  };
+
+  const handleSaveReview = (updatedRecord: EmailRecord) => {
+    setRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
+    setToastMessage(`Record ${updatedRecord.id} human review submitted and verified!`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleMarkSpam = (id: string) => {
+    setRecords(prev => prev.map(r => r.id === id ? { ...r, category: 'spam', status: 'clear', statusText: 'Filtered Spam' } : r));
+    setToastMessage(`Record ${id} re-categorized as Spam.`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleSendToReviewQueue = (id: string) => {
+    setRecords(prev => prev.map(r => r.id === id ? { ...r, status: 'unreadable', statusText: 'Pending Human Review' } : r));
+    setSelectedId(id);
+    setActiveFilter('Needs review');
+    setToastMessage(`Escalated ${id} to Human Review Queue.`);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   const filteredRecords = records.filter(r => {
@@ -155,6 +196,14 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-[#F8FAFC] text-slate-800 font-sans antialiased overflow-hidden">
       
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-3 right-6 z-50 px-4 py-2.5 bg-slate-900 text-white text-xs font-semibold rounded-xl shadow-2xl flex items-center gap-2 border border-slate-700 animate-bounce">
+          <Sparkles className="w-4 h-4 text-blue-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Clean Top Navbar */}
       <header className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-6 shrink-0 z-30 shadow-xs">
         <div className="flex items-center gap-4">
@@ -209,17 +258,23 @@ export const Dashboard: React.FC = () => {
 
       {/* Summary Metrics Bar */}
       <div className="bg-white border-b border-slate-200/80 px-6 py-3.5 grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
-        <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between">
+        <div 
+          onClick={() => setActiveFilter('All')}
+          className="bg-slate-50/70 hover:bg-slate-100 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-all"
+        >
           <div>
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">Today's Ingested</p>
-            <p className="text-xl font-extrabold text-slate-900 font-mono mt-0.5">50 <span className="text-xs text-slate-500 font-sans font-normal">Emails</span></p>
+            <p className="text-xl font-extrabold text-slate-900 font-mono mt-0.5">{records.length} <span className="text-xs text-slate-500 font-sans font-normal">Emails</span></p>
           </div>
           <div className="p-2.5 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
             <Layers className="w-4.5 h-4.5" />
           </div>
         </div>
 
-        <div className="bg-rose-50/50 border border-rose-200/80 rounded-xl p-3.5 flex items-center justify-between">
+        <div 
+          onClick={() => setActiveFilter('Mismatches')}
+          className="bg-rose-50/50 hover:bg-rose-100/50 border border-rose-200/80 rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-all"
+        >
           <div>
             <p className="text-[10px] font-bold text-rose-700 uppercase tracking-wider font-mono">Discrepancies Flagged</p>
             <p className="text-xl font-extrabold text-rose-700 font-mono mt-0.5">{counts.mismatches} <span className="text-xs text-rose-600/80 font-sans font-normal">Mismatches</span></p>
@@ -229,17 +284,27 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-amber-50/50 border border-amber-200/80 rounded-xl p-3.5 flex items-center justify-between">
+        <div 
+          onClick={() => setActiveFilter('Needs review')}
+          className={`border rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-all ${
+            activeFilter === 'Needs review'
+              ? 'bg-amber-100 border-amber-400 shadow-sm'
+              : 'bg-amber-50/50 hover:bg-amber-100/50 border-amber-200/80'
+          }`}
+        >
           <div>
             <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider font-mono">Human Review Queue</p>
             <p className="text-xl font-extrabold text-amber-800 font-mono mt-0.5">{counts.review} <span className="text-xs text-amber-700/80 font-sans font-normal">Unreadable BL</span></p>
           </div>
           <div className="p-2.5 rounded-lg bg-amber-100/80 text-amber-700 border border-amber-200">
-            <Clock className="w-4.5 h-4.5" />
+            <UserCheck className="w-4.5 h-4.5" />
           </div>
         </div>
 
-        <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-xl p-3.5 flex items-center justify-between">
+        <div 
+          onClick={() => setActiveFilter('Clear')}
+          className="bg-emerald-50/50 hover:bg-emerald-100/50 border border-emerald-200/80 rounded-xl p-3.5 flex items-center justify-between cursor-pointer transition-all"
+        >
           <div>
             <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider font-mono">Auto Verification Rate</p>
             <p className="text-xl font-extrabold text-emerald-800 font-mono mt-0.5">96.8% <span className="text-xs text-emerald-700/80 font-sans font-normal">Verified</span></p>
@@ -282,7 +347,7 @@ export const Dashboard: React.FC = () => {
                       </div>
                       <div className="text-[11px] text-slate-500 mt-0.5">50 emails processed</div>
                     </div>
-                    <span className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full font-mono">3 alert</span>
+                    <span className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full font-mono">{counts.review + counts.mismatches} alert</span>
                   </div>
 
                   {/* Previous Days */}
@@ -318,7 +383,7 @@ export const Dashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xs font-extrabold text-slate-900 tracking-wider font-mono uppercase">INBOX QUEUE</h2>
-                <p className="text-[11px] text-slate-500 mt-0.5">50 items in current batch · Run completed 07:03</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">{records.length} items in current batch · Run completed 07:03</p>
               </div>
               <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 cursor-pointer hover:text-blue-600 transition-colors" />
             </div>
@@ -358,62 +423,78 @@ export const Dashboard: React.FC = () => {
 
           {/* Email Item Feed */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {filteredRecords.map(rec => {
-              const isSelected = rec.id === selectedId;
-              return (
-                <div 
-                  key={rec.id}
-                  onClick={() => setSelectedId(rec.id)}
-                  className={`p-3.5 cursor-pointer transition-all border-l-4 ${
-                    isSelected 
-                      ? 'bg-blue-50/60 border-blue-600' 
-                      : rec.status === 'mismatch'
-                      ? 'border-rose-400 hover:bg-slate-50'
-                      : 'border-transparent hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${
-                        rec.status === 'mismatch' ? 'bg-rose-500' : 
-                        rec.status === 'unreadable' ? 'bg-amber-500' : 
-                        'bg-emerald-500'
-                      }`} />
-                      <span className="text-xs font-bold text-slate-900 truncate max-w-[160px]">{rec.sender}</span>
+            {filteredRecords.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 font-mono">
+                No emails match current filter
+              </div>
+            ) : (
+              filteredRecords.map(rec => {
+                const isSelected = rec.id === selectedId;
+                return (
+                  <div 
+                    key={rec.id}
+                    onClick={() => setSelectedId(rec.id)}
+                    className={`p-3.5 cursor-pointer transition-all border-l-4 ${
+                      isSelected 
+                        ? 'bg-blue-50/60 border-blue-600' 
+                        : rec.status === 'mismatch'
+                        ? 'border-rose-400 hover:bg-slate-50'
+                        : rec.status === 'unreadable'
+                        ? 'border-amber-400 hover:bg-slate-50'
+                        : 'border-transparent hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${
+                          rec.status === 'mismatch' ? 'bg-rose-500' : 
+                          rec.status === 'unreadable' ? 'bg-amber-500' : 
+                          'bg-emerald-500'
+                        }`} />
+                        <span className="text-xs font-bold text-slate-900 truncate max-w-[160px]">{rec.sender}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">{rec.time}</span>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-400">{rec.time}</span>
-                  </div>
 
-                  <p className="text-xs text-slate-600 font-medium truncate mb-2">{rec.subject}</p>
-                  
-                  {/* Badges & ID */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-mono rounded-md">
-                        {rec.id}
-                      </span>
-                      {rec.statusText && (
-                        <span className={`px-2 py-0.5 text-[10px] rounded-md font-semibold ${
-                          rec.status === 'mismatch' ? 'bg-rose-100 text-rose-800' :
-                          rec.status === 'unreadable' ? 'bg-amber-100 text-amber-800' : 
-                          'bg-emerald-100 text-emerald-800'
-                        }`}>
-                          {rec.statusText}
+                    <p className="text-xs text-slate-600 font-medium truncate mb-2">{rec.subject}</p>
+                    
+                    {/* Badges & ID */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-mono rounded-md">
+                          {rec.id}
                         </span>
-                      )}
-                    </div>
+                        {rec.statusText && (
+                          <span className={`px-2 py-0.5 text-[10px] rounded-md font-semibold ${
+                            rec.status === 'mismatch' ? 'bg-rose-100 text-rose-800' :
+                            rec.status === 'unreadable' ? 'bg-amber-100 text-amber-800' : 
+                            'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {rec.statusText}
+                          </span>
+                        )}
+                      </div>
 
-                    <ArrowRight className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'text-blue-600 translate-x-0.5' : 'text-slate-400'}`} />
+                      <ArrowRight className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'text-blue-600 translate-x-0.5' : 'text-slate-400'}`} />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </section>
 
-        {/* Right Column: Clean Verification Matrix */}
+        {/* Right Column: Clean Verification Matrix / Human Review Panel */}
         <main className="flex-1 bg-[#F8FAFC] p-6 overflow-y-auto">
-          {selectedRecord.category === 'document_comparison' ? (
+          {selectedRecord.status === 'unreadable' || activeFilter === 'Needs review' ? (
+            /* Human Review Queue Interactive Interface */
+            <HumanReviewPanel
+              key={selectedRecord.id}
+              record={selectedRecord}
+              onSaveReview={handleSaveReview}
+              onMarkSpam={handleMarkSpam}
+            />
+          ) : selectedRecord.category === 'document_comparison' ? (
             <div className="max-w-4xl space-y-6">
               
               {/* Header Details Card */}
@@ -476,7 +557,7 @@ export const Dashboard: React.FC = () => {
                       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">Parameter Comparison Matrix</h3>
                     </div>
                     <span className="text-[11px] font-mono text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                      7 / 7 Parameters Extracted
+                      {Object.keys(selectedRecord.fields).length} Parameters Extracted
                     </span>
                   </div>
 
@@ -537,10 +618,11 @@ export const Dashboard: React.FC = () => {
                 </button>
 
                 <button 
-                  onClick={() => alert("Case escalated to human reviewer queue")}
-                  className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all shadow-2xs"
+                  onClick={() => handleSendToReviewQueue(selectedRecord.id)}
+                  className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all shadow-2xs flex items-center gap-1.5"
                 >
-                  Send to Human Review Queue
+                  <UserCheck className="w-4 h-4 text-amber-600" />
+                  Re-open in Human Review Queue
                 </button>
 
                 <button 
@@ -580,6 +662,13 @@ export const Dashboard: React.FC = () => {
               <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
                 This message was categorized as <strong className="text-blue-700 font-mono">{selectedRecord.category}</strong>. Document diff matching is skipped automatically.
               </p>
+              <button
+                onClick={() => handleSendToReviewQueue(selectedRecord.id)}
+                className="mt-4 px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+              >
+                <UserCheck className="w-4 h-4 text-amber-600" />
+                Edit / Re-label in Human Review Queue
+              </button>
             </div>
           )}
         </main>
@@ -599,8 +688,9 @@ export const Dashboard: React.FC = () => {
             <div className="p-4">
               <FileUpload 
                 onProcessFiles={(files) => {
-                  alert(`Ingested ${files.length} documents into batch`);
+                  setToastMessage(`Ingested ${files.length} documents into batch`);
                   setShowUploadModal(false);
+                  setTimeout(() => setToastMessage(null), 4000);
                 }} 
               />
             </div>
