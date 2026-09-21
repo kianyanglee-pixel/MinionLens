@@ -1,0 +1,136 @@
+THE COACH — Pipeline Report Card
+Run by,kianyanglee-pixel
+Evaluated at,2026-09-21T17:29:14.399388+00:00
+AI recommendations powered by,Ollama (local) — model: qwen2.5:7b
+
+Coach run,N=5 email(s) processed before stopping (requested limit of 5)
+Graded against,"5 of 520 in the answer key (coverage below reads against this subset, not the full key)"
+
+Emails in answer key,5
+Emails in submission,5
+Emails actually graded,5 (100.0% coverage),Percent of our answer-key emails that the pipeline actually produced a result for.
+Missing from submission,none
+"Extra in submission, not in answer key",none
+
+=== CATEGORY — what type of email it thought this was ===
+(BL_COMPARISON / SI_REQUEST / INVOICE_QUERY / GENERAL / SPAM)
+
+Accuracy,100.0% (5/5 correct),"How often the pipeline's answer exactly matched the correct one, out of every email checked."
+Macro-F1,1.0,"One overall score that treats every label fairly, so rare labels can't hide behind common ones."
+
+"Per-label breakdown — For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall)."
+Label,Precision,Recall,F1,Support
+BL_COMPARISON,1.0,1.0,1.0,4
+INVOICE_QUERY,1.0,1.0,1.0,1
+
+"Confusion matrix — Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which."
+Actual \ Predicted,BL_COMPARISON,INVOICE_QUERY
+BL_COMPARISON,4,0
+INVOICE_QUERY,0,1
+
+=== STATUS — the overall verdict on the shipment documents ===
+(OK / MISMATCH / NEEDS_REVIEW)
+
+Accuracy,60.0% (3/5 correct),"How often the pipeline's answer exactly matched the correct one, out of every email checked."
+Macro-F1,0.5556,"One overall score that treats every label fairly, so rare labels can't hide behind common ones."
+
+"Per-label breakdown — For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall)."
+Label,Precision,Recall,F1,Support
+MISMATCH,1.0,1.0,1.0,1
+NEEDS_REVIEW,0.0,0.0,0.0,0
+OK,1.0,0.5,0.6667,4
+
+"Confusion matrix — Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which."
+Actual \ Predicted,MISMATCH,NEEDS_REVIEW,OK
+MISMATCH,1,0,0
+NEEDS_REVIEW,0,0,0
+OK,0,2,2
+
+=== REVIEW_REASON — why it asked a human to take a look ===
+(only set when status is NEEDS_REVIEW)
+
+Accuracy,60.0% (3/5 correct),"How often the pipeline's answer exactly matched the correct one, out of every email checked."
+Macro-F1,0.25,"One overall score that treats every label fairly, so rare labels can't hide behind common ones."
+
+"Per-label breakdown — For each label: how trustworthy a guess of it is (precision), and how many real cases it caught (recall)."
+Label,Precision,Recall,F1,Support
+missing_attachment,0.0,0.0,0.0,0
+missing_value,0.0,0.0,0.0,0
+null,1.0,0.6,0.75,5
+
+"Confusion matrix — Shows what it actually predicted versus the correct answer, so you can see which labels get confused for which."
+Actual \ Predicted,missing_attachment,missing_value,null
+missing_attachment,0,0,0
+missing_value,0,0,0
+null,1,1,3
+
+(No emails in the answer key actually needed needed review — nothing to check here.)
+
+=== DEFECT_FIELDS — which specific fields it flagged as broken ===
+
+Exact-match accuracy,100.0%,"How often it flagged the exact right set of broken fields — nothing missing, nothing extra."
+Mean Jaccard overlap,1.0,"On average, how much its flagged fields overlapped with the truly broken ones — partial credit allowed."
+
+"Per-field breakdown — For each field name: how reliably it gets correctly flagged as broken, across every email."
+Field,Precision,Recall
+consignee,1.0,1.0
+notify_party,1.0,1.0
+
+"Of the 1 emails that truly had a defect, 1 got it exactly right (100.0%)."
+
+"=== HAS_DEFECT — yes/no, did it think this shipment had a problem ==="
+
+Accuracy,100.0%,"How often 'has a defect or not' matched the real answer, out of every email checked."
+Precision,1.0,"When it raised a defect flag, how often that flag turned out to be correct."
+Recall,1.0,"Out of every email that truly had a defect, how many it actually caught."
+F1,1.0,"One score balancing precision and recall together, so neither can be gamed alone."
+Cohen's Kappa,1.0,"How much better than random guessing this is — 0 means pure luck, 1 means perfect."
+
+"Confusion matrix — Splits results into caught defects, false alarms, missed defects, and correctly cleared emails."
+,Predicted: defect,Predicted: no defect
+Actual: defect,1,0
+Actual: no defect,0,4
+
+"Of the 1 emails that truly had a defect, 1 got it exactly right (100.0%)."
+
+=== OVERALL SUMMARY ===
+
+Row-level exact match,60.0% (3/5),"Percent of emails where every single field was predicted correctly, not just one or two."
+Processing-failure rate,0.0% (0 emails),"Percent of emails the pipeline itself choked on — a system hiccup, not a wrong content guess."
+Coverage,100.0%,Percent of our answer-key emails that the pipeline actually produced a result for.
+
+=== MISTAKES ===
+
+CATEGORY MISTAKES (0 total)
+no mistakes
+
+STATUS MISTAKES (2 total)
+Email ID,Actual,Predicted
+email_003,OK,NEEDS_REVIEW
+email_005,OK,NEEDS_REVIEW
+
+REVIEW_REASON MISTAKES (2 total)
+Email ID,Actual,Predicted
+email_003,null,missing_attachment
+email_005,null,missing_value
+
+DEFECT_FIELDS MISTAKES (0 total)
+no mistakes
+
+HAS_DEFECT MISTAKES (0 total)
+no mistakes
+
+"=== AI RECOMMENDATIONS — LLM-generated advice, not a graded metric. Review before applying. ==="
+
+"Hardcoded harness changes to consider (evaluator.py logic, no prompt involved)"
+(none suggested)
+
+Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py)
+(none suggested)
+
+"General advice (model choice, data quality, or anything else outside harness/prompt tweaks)"
+(none suggested)
+
+"All three lists above came back empty — raw LLM response, for debugging:"
+"{""name"": ""theme1.xml"", ""content"": ""\u4e3b\u98981\u7684XML\u5185\u5bb9""}"
+
