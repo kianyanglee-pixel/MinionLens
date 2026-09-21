@@ -33,9 +33,33 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(BACKEND_DIR / ".env")
 
 from loader import Inbox  # noqa: E402
-from app.llm import ask_json  # noqa: E402
+from app.llm import ask_json, client, DEFAULT_MODEL  # noqa: E402
 
 SUBMISSION_PATH = "submissions/submission.json"
+
+
+def _detect_llm_provider() -> str:
+    """Figures out which of llm.py's provider blocks is currently active by
+    inspecting the `client` object it constructed — llm.py only ever
+    uncomments one block at a time, so this stays accurate without llm.py
+    needing to declare its own provider name anywhere."""
+    module_name = type(client).__module__
+
+    if "genai" in module_name:
+        return "Google Gemini (direct)"
+
+    base_url = str(getattr(client, "base_url", ""))
+    if "openrouter.ai" in base_url:
+        return "OpenRouter"
+    if "localhost:11434" in base_url or "ollama" in base_url:
+        return "Ollama (local)"
+    if "api.openai.com" in base_url:
+        return "OpenAI (direct)"
+    return f"Unknown provider (client={module_name}, base_url={base_url or 'n/a'})"
+
+
+def _llm_info_line() -> str:
+    return f"{_detect_llm_provider()} — model: {DEFAULT_MODEL}"
 
 
 def _load_ground_truth() -> dict:
@@ -594,6 +618,7 @@ def render_text(report: dict, recommendations: dict) -> str:
         RULE,
         "THE INVIGILATOR — Pipeline Report Card",
         f"Evaluated at: {report['evaluated_at']}",
+        f"AI recommendations powered by: {_llm_info_line()}",
         RULE,
         "",
         f"Emails in answer key:     {report['ground_truth_count']}",
@@ -749,6 +774,7 @@ def render_graphs(report: dict, output_path: Path) -> None:
 
 
 def main():
+    print(f"Active LLM: {_llm_info_line()}")
     ground_truth = _load_ground_truth()
     inbox = Inbox("supabase")
     submission = _load_submission(inbox)

@@ -957,3 +957,7 @@ Hardcoded harness changes to consider (evaluator.py logic, no prompt involved):
 
 Prompt wording changes to consider (classifier.py / evaluator.py / extractor.py):
   (none suggested)
+
+  ====
+  MODEL USED: Ollama 3.18b
+  ===
