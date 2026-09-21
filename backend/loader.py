@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 """
-loader.py — one-import access to the SDOC hackathon inbox (participants),
-loaded from a Supabase Storage bucket.
+loader.py — access to the SDOC hackathon inbox, loaded either from a
+Supabase Storage bucket or an isolated local batch folder.
 
-    from loader import Inbox
+    # Supabase source:
     inbox = Inbox("supabase")
-    for email in inbox:
-        print(email["email_id"], email["subject"])
-        for path in email["attachments"]:
-            text = inbox.read_text(path)  # SI/BL .txt content
 
-Older local-files / HTTP-server versions are commented out at the bottom
-of this file for reference — we don't use local data anymore.
-
-You do NOT have ground truth. Build a submission dict shaped like
-sample_submission.json, then either score it with score_cli.py (if you
-have a ground_truth.json) or upload it with inbox.submit(...).
+    # Isolated local batch folder (String or Path):
+    inbox = Inbox("backend/data/batches/run_20260921_084144_3f331a")
 """
 import json
 import os
@@ -25,31 +17,92 @@ DEFAULT_SUPABASE_BUCKET = "emails_and_attachment"
 
 
 class Inbox:
-    def __init__(self, source):
-        self.source = source.rstrip("/")
-        self.is_supabase = self.source == "supabase" or self.source.startswith("supabase://")
+    def __init__(self, source="supabase"):
+        # 1. Determine whether source is Supabase or a local/batch directory
+        if isinstance(source, Path):
+            self.source = str(source)
+            self.is_supabase = False
+            self.local_root = source.resolve()
+        else:
+            clean_source = str(source).rstrip("/\\")
+            self.source = clean_source
+            self.is_supabase = clean_source == "supabase" or clean_source.startswith("supabase://")
+            
+            if not self.is_supabase:
+                if clean_source == "data":
+                    self.local_root = (Path(__file__).resolve().parent / "data").resolve()
+                else:
+                    self.local_root = Path(clean_source).resolve()
+            else:
+                self.local_root = None
+
+        # 2. Setup Supabase attributes if required
         self._supabase_client = None
-        self.bucket = (self.source[len("supabase://"):] if "://" in self.source
-                       else os.getenv("SUPABASE_BUCKET", DEFAULT_SUPABASE_BUCKET))
+        if self.is_supabase:
+            self.bucket = (
+                self.source[len("supabase://"):]
+                if "://" in self.source
+                else os.getenv("SUPABASE_BUCKET", DEFAULT_SUPABASE_BUCKET)
+            )
+        else:
+            self.bucket = None
+            self.inbox_dir = self.local_root / "inbox"
+            self.attachments_dir = self.local_root / "attachments"
 
     # -- listing ---------------------------------------------------------
     def emails(self):
         """Return the list of email records (dicts)."""
-        files = self._supabase_list("inbox")
-        names = sorted(f["name"] for f in files if f["name"].startswith("email_"))
-        return [json.loads(self._supabase_download(f"inbox/{name}")) for name in names]
+        if self.is_supabase:
+            files = self._supabase_list("inbox")
+            names = sorted(f["name"] for f in files if f["name"].startswith("email_"))
+            return [json.loads(self._supabase_download(f"inbox/{name}")) for name in names]
+
+        # Local directory reading from batch-isolated folder
+        if not self.inbox_dir.exists():
+            return []
+
+        json_paths = sorted(self.inbox_dir.glob("*.json"))
+        records = []
+        for p in json_paths:
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                records.append(data)
+            except Exception as err:
+                print(f"[!] Failed to read {p.name}: {err}")
+        return records
 
     def __iter__(self):
         return iter(self.emails())
 
     def get(self, email_id):
-        return json.loads(self._supabase_download(f"inbox/{email_id}.json"))
+        if self.is_supabase:
+            return json.loads(self._supabase_download(f"inbox/{email_id}.json"))
+
+        target_file = self.inbox_dir / f"{email_id}.json"
+        if not target_file.exists():
+            raise FileNotFoundError(f"Email {email_id} not found in {self.inbox_dir}")
+        return json.loads(target_file.read_text(encoding="utf-8"))
 
     # -- attachments -----------------------------------------------------
     def read_bytes(self, att_path):
-        """Raw bytes of an attachment. att_path is the string exactly as it
-        appears in email['attachments'] (e.g. 'attachments/email_004_SI.txt')."""
-        return self._supabase_download(att_path.lstrip("/"))
+        """Raw bytes of an attachment. att_path can be 'attachments/email_004_SI.txt'
+        or a relative/filename path."""
+        if self.is_supabase:
+            return self._supabase_download(att_path.lstrip("/"))
+
+        # Strip any leading 'attachments/' or directory wrappers
+        filename = Path(att_path).name
+        local_file = self.attachments_dir / filename
+
+        # Fallback to direct path resolution if not in attachments_dir
+        if not local_file.exists():
+            fallback = self.local_root / att_path
+            if fallback.exists():
+                local_file = fallback
+            else:
+                raise FileNotFoundError(f"Attachment not found: {att_path} in {self.attachments_dir}")
+
+        return local_file.read_bytes()
 
     def read_text(self, att_path, encoding="utf-8"):
         return self.read_bytes(att_path).decode(encoding, errors="replace")
@@ -58,26 +111,35 @@ class Inbox:
     def submit(self, submission):
         """Upload a submission as a JSON file under submissions/ in the
         same bucket and return the storage path."""
+        if not self.is_supabase:
+            raise NotImplementedError("submit() is only supported when source='supabase'")
+
         path = "submissions/submission.json"
         data = json.dumps(submission, indent=2).encode()
         self._supabase().storage.from_(self.bucket).upload(
-            path, data,
+            path,
+            data,
             file_options={"content-type": "application/json", "upsert": "true"},
         )
         return {"bucket": self.bucket, "path": path}
 
     def sample_submission(self):
+        if not self.is_supabase:
+            sample_path = self.local_root / "sample_submission.json"
+            if sample_path.exists():
+                return json.loads(sample_path.read_text(encoding="utf-8"))
+            raise FileNotFoundError("sample_submission.json not found locally")
         return json.loads(self._supabase_download("sample_submission.json"))
 
     # -- supabase helpers --------------------------------------------------
     def _supabase(self):
         if self._supabase_client is None:
-            from supabase import create_client  # lazy import: optional dependency
+            from supabase import create_client
             url = os.getenv("SUPABASE_URL")
             key = os.getenv("SUPABASE_KEY")
             if not url or not key:
                 raise RuntimeError(
-                    "Inbox(\"supabase\") needs SUPABASE_URL and SUPABASE_KEY in the environment"
+                    'Inbox("supabase") needs SUPABASE_URL and SUPABASE_KEY in the environment'
                 )
             self._supabase_client = create_client(url, key)
         return self._supabase_client
@@ -86,8 +148,6 @@ class Inbox:
         return self._supabase().storage.from_(self.bucket).download(path)
 
     def _supabase_list(self, folder, page_size=1000):
-        """list() only returns one page (Supabase defaults to 100 items),
-        so page through with offset until a short page tells us we're done."""
         store = self._supabase().storage.from_(self.bucket)
         results = []
         offset = 0
@@ -101,28 +161,11 @@ class Inbox:
 
 
 if __name__ == "__main__":
-    # tiny smoke test / demo against the Supabase bucket (only enabled source)
     from dotenv import load_dotenv
     load_dotenv()
     inbox = Inbox("supabase")
     ems = inbox.emails()
     print(f"{len(ems)} emails from Supabase bucket {inbox.bucket}")
-    docs = [e for e in ems if e["attachments"]]
-    print(f"{len(docs)} have attachments; example: {docs[0]['email_id']}")
-    for a in docs[0]["attachments"]:
-        head = inbox.read_text(a)[:60].replace("\n", " ") if a.endswith(".txt") else "(binary)"
-        print(f"  {a}: {head}")
-    for email in inbox:
-        print(f"Email ID: {email['email_id']}")
-        for att_path in email.get("attachments", []):
-            if att_path.endswith(".txt"):
-                text = inbox.read_text(att_path)
-                print(f"  [Text] {att_path}: {text[:50]}...")
-            else:
-                raw = inbox.read_bytes(att_path)
-                print(f"  [Binary] {att_path}: {len(raw)} bytes")
-        break  # check just the first email
-
 
 # =========================================================================
 # METHOD 2 (local files) and METHOD 3 (HTTP server) — DISABLED, kept for

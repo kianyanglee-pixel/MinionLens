@@ -1,148 +1,123 @@
-import React from 'react';
-import { SlidersHorizontal, ArrowRight } from 'lucide-react';
-import { EmailRecord } from '../pages/Dashboard';
+import React, { useState } from 'react';
+import { Mail, AlertCircle, CheckCircle2, Search } from 'lucide-react';
+import { EmailRecord } from '../batch';
 
 interface EmailQueuePanelProps {
-  records: EmailRecord[];
-  selectedId: string;
-  onSelectRecord: (id: string) => void;
-  activeFilter: string;
-  onFilterChange: (filter: string) => void;
+  emails: EmailRecord[];
+  selectedEmailId: string | null;
+  onSelectEmail: (email: EmailRecord) => void;
 }
 
 export const EmailQueuePanel: React.FC<EmailQueuePanelProps> = ({
-  records,
-  selectedId,
-  onSelectRecord,
-  activeFilter,
-  onFilterChange,
+  emails,
+  selectedEmailId,
+  onSelectEmail,
 }) => {
-  const counts = {
-    all: records.length,
-    mismatches: records.filter((r) => r.status === 'mismatch').length,
-    review: records.filter((r) => r.status === 'unreadable').length,
-    clear: records.filter((r) => r.status === 'clear' && r.category === 'document_comparison').length,
-    spam: records.filter((r) => r.category === 'spam').length,
-  };
+  const [filter, setFilter] = useState<'ALL' | 'MISMATCH' | 'NEEDS_REVIEW' | 'OK'>('ALL');
+  const [search, setSearch] = useState('');
 
-  const filterTabs = [
-    { label: 'All', count: counts.all },
-    { label: 'Mismatches', count: counts.mismatches, alert: true },
-    { label: 'Needs review', count: counts.review, warn: true },
-    { label: 'Clear', count: counts.clear, success: true },
-    { label: 'Spam', count: counts.spam },
-  ];
+  const filteredEmails = emails.filter((item) => {
+    const matchesFilter = filter === 'ALL' || item.automated_status === filter;
+    const matchesSearch =
+      item.email_id.toLowerCase().includes(search.toLowerCase()) ||
+      item.category.toLowerCase().includes(search.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
 
   return (
-    <section className="w-96 border-r border-slate-200 bg-white flex flex-col shrink-0">
-      {/* Header & Filter Bar */}
-      <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xs font-extrabold text-slate-900 tracking-wider font-mono uppercase">
-              INBOX QUEUE
-            </h2>
-            <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
-              {records.length} items in current batch · Run completed 07:03
-            </p>
-          </div>
-          <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 cursor-pointer hover:text-blue-600 transition-colors" />
+    <div className="w-96 border-r border-slate-200 bg-white flex flex-col h-full shrink-0">
+      {/* Search & Filter Header */}
+      <div className="p-4 border-b border-slate-100 space-y-3">
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            placeholder="Search email ID or category..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-mono"
+          />
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 mt-3 overflow-x-auto pb-1 text-[11px]">
-          {filterTabs.map((tab) => {
-            const isActive = activeFilter === tab.label;
-            return (
-              <button
-                key={tab.label}
-                onClick={() => onFilterChange(tab.label)}
-                className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] whitespace-nowrap transition-all ${
-                  isActive
-                    ? 'bg-slate-900 text-white font-bold shadow-xs'
-                    : tab.alert
-                    ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
-                    : tab.warn
-                    ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
-                    : tab.success
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200/60'
-                }`}
-              >
-                {tab.label} <span className="font-mono ml-0.5 text-[10px]">({tab.count})</span>
-              </button>
-            );
-          })}
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+          {(['ALL', 'MISMATCH', 'NEEDS_REVIEW', 'OK'] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setFilter(status)}
+              className={`flex-1 py-1 text-[11px] font-bold rounded-md transition-all ${
+                filter === status
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              {status}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Feed List */}
+      {/* Scrollable Email List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-        {records.map((rec) => {
-          const isSelected = rec.id === selectedId;
-          return (
-            <div
-              key={rec.id}
-              onClick={() => onSelectRecord(rec.id)}
-              className={`p-3.5 cursor-pointer transition-all border-l-4 ${
-                isSelected
-                  ? 'bg-blue-50/60 border-blue-600'
-                  : rec.status === 'mismatch'
-                  ? 'border-rose-400 hover:bg-slate-50'
-                  : 'border-transparent hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
+        {filteredEmails.length === 0 ? (
+          <div className="p-6 text-center text-xs text-slate-400">No emails match the filter</div>
+        ) : (
+          filteredEmails.map((email) => {
+            const isSelected = email.email_id === selectedEmailId;
+            return (
+              <div
+                key={email.email_id}
+                onClick={() => onSelectEmail(email)}
+                className={`p-3.5 cursor-pointer transition-colors ${
+                  isSelected ? 'bg-blue-50/70 border-l-4 border-blue-600' : 'hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-xs font-mono font-bold text-slate-800">
+                      {email.email_id}
+                    </span>
+                  </div>
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      rec.status === 'mismatch'
-                        ? 'bg-rose-500'
-                        : rec.status === 'unreadable'
-                        ? 'bg-amber-500'
-                        : 'bg-emerald-500'
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-semibold ${
+                      email.automated_status === 'MISMATCH'
+                        ? 'bg-red-100 text-red-700'
+                        : email.automated_status === 'NEEDS_REVIEW'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-emerald-100 text-emerald-700'
                     }`}
-                  />
-                  <span className="text-xs font-bold text-slate-900 truncate max-w-[160px]">
-                    {rec.sender}
+                  >
+                    {email.automated_status}
                   </span>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">{rec.time}</span>
-              </div>
 
-              <p className="text-xs text-slate-600 font-medium truncate mb-2">{rec.subject}</p>
-
-              {/* Badges & ID */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-mono rounded-md">
-                    {rec.id}
-                  </span>
-                  {rec.statusText && (
-                    <span
-                      className={`px-2 py-0.5 text-[10px] rounded-md font-semibold ${
-                        rec.status === 'mismatch'
-                          ? 'bg-rose-100 text-rose-800'
-                          : rec.status === 'unreadable'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}
-                    >
-                      {rec.statusText}
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-500 font-medium">{email.category}</span>
+                  {email.has_defect && (
+                    <span className="flex items-center gap-1 text-[10px] text-red-600 font-mono">
+                      <AlertCircle className="w-3 h-3" />
+                      {email.defect_fields.length} defect(s)
                     </span>
                   )}
                 </div>
 
-                <ArrowRight
-                  className={`w-3.5 h-3.5 transition-transform ${
-                    isSelected ? 'text-blue-600 translate-x-0.5' : 'text-slate-400'
-                  }`}
-                />
+                {email.defect_fields && email.defect_fields.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {email.defect_fields.map((field) => (
+                      <span
+                        key={field}
+                        className="text-[9px] font-mono bg-red-50 border border-red-200 text-red-600 px-1.5 py-0.2 rounded"
+                      >
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
-    </section>
+    </div>
   );
 };

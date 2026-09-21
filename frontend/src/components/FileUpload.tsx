@@ -4,24 +4,13 @@ import {
   Cloud, CheckCircle2, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
 
-export interface BatchPayload {
-  sourceType: 'local' | 'cloud' | 'drive';
-  inboxFiles?: File[];
-  attachmentFiles?: File[];
-  cloudConfig?: {
-    provider: string;
-    inboxUri: string;
-    attachmentsUri: string;
-  };
-}
-
 interface FileUploadProps {
-  onSuccess?: () => void;
+  onStartStream: (runId: string, totalCount: number) => void;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   const [sourceType, setSourceType] = useState<'local' | 'cloud' | 'drive'>('local');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Local Dual-Folder State
   const [inboxFiles, setInboxFiles] = useState<File[]>([]);
@@ -31,7 +20,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
   const [cloudInboxUri, setCloudInboxUri] = useState('s3://shipping-ops-bucket/inbox/');
   const [cloudAttachmentsUri, setCloudAttachmentsUri] = useState('s3://shipping-ops-bucket/attachments/');
 
-  // Drive Folder URLs / IDs
+  // Drive Folder URLs
   const [driveInboxUrl, setDriveInboxUrl] = useState('');
   const [driveAttachmentsUrl, setDriveAttachmentsUrl] = useState('');
 
@@ -61,7 +50,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
     (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '');
 
   const handleStartProcessing = async () => {
-    setIsSubmitting(true);
+    setIsUploading(true);
+    const startedAt = new Date().toISOString();
+
     try {
       let res: Response;
 
@@ -69,6 +60,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
         const formData = new FormData();
         inboxFiles.forEach(f => formData.append('inbox_files', f));
         attachmentFiles.forEach(f => formData.append('attachment_files', f));
+        formData.append('started_at', startedAt);
+        formData.append('email_count', String(inboxFiles.length));
 
         res = await fetch('/api/ingest', { method: 'POST', body: formData });
       } else {
@@ -77,6 +70,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             source_type: sourceType,
+            started_at: startedAt,
             inbox_uri: sourceType === 'cloud' ? cloudInboxUri : driveInboxUrl,
             attachments_uri: sourceType === 'cloud' ? cloudAttachmentsUri : driveAttachmentsUrl
           })
@@ -84,42 +78,43 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
       }
 
       const data = await res.json();
-      if (res.ok && data.status === 'success') {
-        alert(`Batch Ingested Successfully!\nEmails: ${data.inbox_count || data.inbox_downloaded || inboxFiles.length}`);
-        if (onSuccess) onSuccess();
+
+      if (res.ok && data.status === 'success' && data.run_id) {
+        const count = data.inbox_count || data.inbox_downloaded || inboxFiles.length;
+        // Delegate tracking up to Dashboard so it survives closing modal
+        onStartStream(data.run_id, count);
       } else {
         alert(`Ingestion failed: ${data.message || 'Unknown error'}`);
+        setIsUploading(false);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Unable to connect to backend ingest service.');
-    } finally {
-      setIsSubmitting(false);
+      alert(`Backend Error: ${err.message || 'Unable to connect to backend.'}`);
+      setIsUploading(false);
     }
   };
 
   return (
     <div className="bg-white rounded-2xl w-full">
-      {/* Top Header & Tabs */}
       <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
         <div>
           <h3 className="font-extrabold text-slate-900 text-base font-sans">Batch Document Ingestion</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Ingest email records (<code className="text-blue-600 font-mono font-bold">inbox/</code>) and attachments (<code className="text-blue-600 font-mono font-bold">attachments/</code>)[cite: 1].
+            Ingest email records (<code className="text-blue-600 font-mono font-bold">inbox/</code>) and attachments (<code className="text-blue-600 font-mono font-bold">attachments/</code>).
           </p>
         </div>
 
-        {/* Source Switcher */}
         <div className="flex bg-slate-100 p-1 rounded-xl">
           {(['local', 'cloud', 'drive'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
               onClick={() => setSourceType(mode)}
+              disabled={isUploading}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
                 sourceType === mode 
                   ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80' 
-                  : 'text-slate-500 hover:text-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 disabled:opacity-50'
               }`}
             >
               {mode === 'local' && <HardDrive className="w-3.5 h-3.5" />}
@@ -131,11 +126,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
         </div>
       </div>
 
-      {/* Mode 1: Local Dual Folder Upload */}
       {sourceType === 'local' && (
         <div className="grid grid-cols-2 gap-4">
-          
-          {/* Folder 1: Inbox JSONs */}
           <div 
             onClick={() => inboxInputRef.current?.click()}
             className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
@@ -145,7 +137,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
             <input
               ref={inboxInputRef}
               type="file"
-              // @ts-expect-error webkitdirectory is standard in Chromium/Firefox
+              // @ts-expect-error webkitdirectory standard
               webkitdirectory=""
               directory=""
               multiple
@@ -158,11 +150,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
               </div>
               <p className="text-xs font-bold text-slate-900">1. Select "inbox" Folder</p>
               <p className="text-[11px] text-slate-400 font-mono mt-1">JSON Metadata Files</p>
-              
               {inboxFiles.length > 0 ? (
                 <div className="mt-3.5 flex items-center gap-1.5 text-xs text-blue-700 font-mono font-bold bg-blue-100/70 px-2.5 py-1 rounded-lg">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {inboxFiles.length} JSONs loaded
+                  {inboxFiles.length} Emails Loaded
                 </div>
               ) : (
                 <span className="mt-3.5 text-xs text-blue-600 font-semibold hover:underline">Choose folder</span>
@@ -170,7 +161,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
             </div>
           </div>
 
-          {/* Folder 2: Attachments */}
           <div 
             onClick={() => attachmentsInputRef.current?.click()}
             className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
@@ -180,7 +170,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
             <input
               ref={attachmentsInputRef}
               type="file"
-              // @ts-expect-error webkitdirectory is standard in Chromium/Firefox
+              // @ts-expect-error webkitdirectory standard
               webkitdirectory=""
               directory=""
               multiple
@@ -193,22 +183,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
               </div>
               <p className="text-xs font-bold text-slate-900">2. Select "attachments" Folder</p>
               <p className="text-[11px] text-slate-400 font-mono mt-1">TXT, PDF, XLSX Files</p>
-              
               {attachmentFiles.length > 0 ? (
                 <div className="mt-3.5 flex items-center gap-1.5 text-xs text-emerald-700 font-mono font-bold bg-emerald-100/70 px-2.5 py-1 rounded-lg">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {attachmentFiles.length} files loaded
+                  {attachmentFiles.length} Files Loaded
                 </div>
               ) : (
                 <span className="mt-3.5 text-xs text-emerald-600 font-semibold hover:underline">Choose folder</span>
               )}
             </div>
           </div>
-
         </div>
       )}
 
-      {/* Mode 2: Cloud Object Storage (S3 / GCS) */}
       {sourceType === 'cloud' && (
         <div className="space-y-3.5 py-1">
           <div>
@@ -236,7 +223,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
         </div>
       )}
 
-      {/* Mode 3: Google Drive Shared Folders */}
       {sourceType === 'drive' && (
         <div className="space-y-3.5 py-1">
           <div>
@@ -266,23 +252,22 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
         </div>
       )}
 
-      {/* Bottom Action Footer */}
       <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
           <AlertCircle className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-          <span>Requires matching email IDs between both folders[cite: 1].</span>
+          <span>Files will be verified against SI and BL attachments</span>
         </div>
 
         <button
           type="button"
           onClick={handleStartProcessing}
-          disabled={!canSubmit || isSubmitting}
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+          disabled={!canSubmit || isUploading}
+          className="px-5 py-2.5 bg-[#1e293b] hover:bg-[#0f172a] disabled:bg-slate-200 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
         >
-          {isSubmitting ? (
+          {isUploading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Uploading & Processing...</span>
+              <span>Ingesting Files...</span>
             </>
           ) : (
             <>
@@ -292,7 +277,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onSuccess }) => {
           )}
         </button>
       </div>
-
     </div>
   );
 };

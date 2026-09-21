@@ -1,63 +1,70 @@
 import React from 'react';
-import { Ship, Search, Radio } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, Clock, RefreshCw, PlusCircle } from 'lucide-react';
+import { RunSummary } from '../batch';
 
 interface NavbarProps {
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
-  userInitials?: string;
+  run: RunSummary | null;
+  onRefresh: () => void;
+  onOpenUpload: () => void;
+  isLoading: boolean;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ 
-  searchQuery, 
-  onSearchChange, 
-  userInitials = 'OP' 
-}) => {
+export const Navbar: React.FC<NavbarProps> = ({ run, onRefresh, onOpenUpload, isLoading }) => {
   return (
-    <header className="h-16 border-b border-slate-200 bg-white grid grid-cols-3 items-center px-6 shrink-0 z-30 shadow-xs">
-      {/* Left: Brand Identity */}
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-6 flex items-center justify-between text-white shrink-0">
+      {/* Left branding */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
-          <Ship className="w-5 h-5" />
+        <div className="p-1.5 bg-blue-600 rounded-lg">
+          <ShieldCheck className="w-4 h-4 text-white" />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-extrabold text-lg tracking-tight text-slate-900">
-            MinionShip
-          </span>
-          <span className="px-2 py-0.5 text-[10px] font-mono font-semibold rounded-md bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wider">
-            Verification Core
-          </span>
+        <div>
+          <div className="text-xs font-bold tracking-wider uppercase">SDOC BATCH VERIFICATION</div>
+          <div className="text-[11px] text-slate-400 font-mono">
+            Run: <span className="text-slate-300">{run?.run_id || 'No active batch'}</span>
+          </div>
         </div>
       </div>
 
-      {/* Center: Search Bar with Keyboard Shortcut Badge */}
-      <div className="flex justify-center">
-        <div className="relative w-full max-w-sm">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input 
-            type="text"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search booking ID, shipper, parameters..."
-            className="w-full pl-9 pr-12 py-1.5 rounded-xl border border-slate-200 bg-slate-50/80 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 transition-all font-sans"
-          />
-          <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white rounded border border-slate-200 shadow-2xs">
-            ⌘K
-          </kbd>
-        </div>
-      </div>
+      {/* Right Stats & Actions */}
+      <div className="flex items-center gap-3">
+        {run && (
+          <>
+            <div className="bg-slate-800/90 border border-slate-700 px-3 py-1 rounded-md text-xs font-mono flex items-center gap-1.5">
+              <span className="text-slate-400">Total:</span>
+              <span className="font-bold text-slate-100">{run.email_count}</span>[cite: 1]
+            </div>
 
-      {/* Right: Port Live Indicator & Operator Avatar */}
-      <div className="flex items-center justify-end gap-3">
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-50 border border-slate-200 text-xs">
-          <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-          <span className="text-slate-600 font-mono text-[10px]">LIVE SYNC</span>
-          <span className="text-slate-300">|</span>
-          <span className="text-emerald-700 font-mono font-semibold text-[10px]">PORT KLANG / ROTTERDAM</span>
-        </div>
+            <div className="bg-red-950/40 border border-red-800/60 text-red-300 px-3 py-1 rounded-md text-xs font-mono flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              <span>Mismatches:</span>
+              <span className="font-bold text-red-200">{run.mismatch_count || 0}</span>[cite: 1]
+            </div>
 
-        <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center text-xs font-bold font-mono shadow-xs">
-          {userInitials}
-        </div>
+            <div className="bg-amber-950/40 border border-amber-800/60 text-amber-300 px-3 py-1 rounded-md text-xs font-mono flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Needs Review:</span>
+              <span className="font-bold text-amber-200">{run.needs_review_count || 0}</span>[cite: 1]
+            </div>
+
+            <button
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-colors cursor-pointer"
+              title="Refresh Queue"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </>
+        )}
+
+        {/* Primary Action Button */}
+        <button
+          onClick={onOpenUpload}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-md shadow-sm transition-all cursor-pointer ml-1"
+        >
+          <PlusCircle className="w-3.5 h-3.5" />
+          <span>Run New Batch</span>
+        </button>
       </div>
     </header>
   );

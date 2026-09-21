@@ -1,218 +1,184 @@
-import React from 'react';
-import { 
-  CheckCircle2, XCircle, AlertCircle, ExternalLink, 
-  FileText, Sparkles, Layers, Activity 
-} from 'lucide-react';
-import { EmailRecord } from '../pages/Dashboard';
+import React, { useState } from 'react';
+import { Check, X, AlertCircle, FileText, CheckCircle2, XCircle } from 'lucide-react';
+import { EmailRecord } from '../batch';
 
 interface InspectionPanelProps {
-  record: EmailRecord;
-  onOpenSourceModal: () => void;
-  onResolveDiscrepancy: (recordId: string) => void;
-  onEscalate: (recordId: string) => void;
+  email: EmailRecord | null;
+  onResolve?: (emailId: string, decision: 'APPROVED' | 'REJECTED', notes: string) => Promise<void>;
 }
 
-export const InspectionPanel: React.FC<InspectionPanelProps> = ({
-  record,
-  onOpenSourceModal,
-  onResolveDiscrepancy,
-  onEscalate,
-}) => {
-  if (record.category !== 'document_comparison') {
+export const InspectionPanel: React.FC<InspectionPanelProps> = ({ email, onResolve }) => {
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!email) {
     return (
-      <main className="flex-1 bg-[#F8FAFC] p-8 flex flex-col items-center justify-center text-center">
-        <div className="p-4 bg-slate-100 rounded-2xl border border-slate-200 mb-4 text-slate-500">
-          <FileText className="w-10 h-10 stroke-1" />
-        </div>
-        <h3 className="text-base font-bold text-slate-800">Non-Manifest Triage Item</h3>
-        <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
-          This message was categorized as <strong className="text-blue-700 font-mono">{record.category}</strong>. 
-          Document comparison is skipped for non-checking requests.
-        </p>
-      </main>
+      <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 text-slate-400 p-8">
+        <FileText className="w-10 h-10 mb-2 opacity-40" />
+        <p className="text-xs font-mono">Select an email from the queue to inspect details</p>
+      </div>
     );
   }
 
+  const comparison = email.trace?.comparison;
+  const comparisons = comparison?.field_comparisons || {};
+  const classification = email.trace?.classification;
+
+  const handleAction = async (decision: 'APPROVED' | 'REJECTED') => {
+    if (!onResolve) return;
+    setIsSubmitting(true);
+    await onResolve(email.email_id, decision, decisionNotes);
+    setDecisionNotes('');
+    setIsSubmitting(false);
+  };
+
   return (
-    <main className="flex-1 bg-[#F8FAFC] p-6 overflow-y-auto">
-      <div className="max-w-4xl space-y-6">
-        
-        {/* Header Details Card */}
-        <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-xs flex items-start justify-between">
+    <div className="flex-1 bg-slate-50 flex flex-col h-full overflow-y-auto">
+      {/* Header Info */}
+      <div className="bg-white border-b border-slate-200 p-5">
+        <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md font-mono uppercase tracking-wider">
-                BOOKING REF: {record.id}
-              </span>
-              <span className="text-xs text-slate-500">• {record.sender}</span>
+              <h2 className="text-base font-extrabold text-slate-900 font-mono">{email.email_id}</h2>
+              <span className="text-xs font-mono text-slate-400">({email.email_name})</span>
             </div>
-            <h1 className="text-xl font-extrabold text-slate-900 mt-1.5 font-sans tracking-tight">
-              {record.subject}
-            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Category: <span className="font-semibold text-slate-700">{email.category}</span>
+              {classification?.reason && ` — ${classification.reason}`}
+            </p>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <span className="text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-xl flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              Document Verification
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-3 py-1 rounded-lg text-xs font-bold font-mono ${
+                email.automated_status === 'MISMATCH'
+                  ? 'bg-red-100 text-red-700'
+                  : email.automated_status === 'NEEDS_REVIEW'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
+              }`}
+            >
+              Status: {email.automated_status}
             </span>
-            {record.confidence && (
-              <span className="text-[10px] font-mono text-slate-500">
-                LLM Confidence: <strong className="text-slate-800 uppercase">{record.confidence}</strong>
-              </span>
-            )}
           </div>
         </div>
 
-        {/* Status Alert Banner */}
-        {record.status === 'mismatch' && (
-          <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl shadow-2xs flex items-start gap-3">
-            <div className="p-2 bg-rose-100 text-rose-600 rounded-xl shrink-0">
-              <AlertCircle className="w-5 h-5" />
+        {/* Source File Paths */}
+        {comparison && (
+          <div className="mt-3 flex gap-4 text-xs font-mono text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <div>
+              <span className="font-bold text-slate-800">SI Path:</span> {comparison.si_path}
             </div>
             <div>
-              <h4 className="text-sm font-bold text-rose-950">
-                Discrepancy Detected — Field Mismatch in Shipping Manifest
-              </h4>
-              <p className="text-xs text-rose-800 mt-1 leading-relaxed">
-                The declared <strong className="underline decoration-rose-500 decoration-2">Container Count</strong> in the Shipping Instruction (SI) does not match the Bill of Lading (BL) draft. Resolution required.
-              </p>
+              <span className="font-bold text-slate-800">BL Path:</span> {comparison.bl_path}
             </div>
           </div>
         )}
+      </div>
 
-        {record.status === 'clear' && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-2xs flex items-start gap-3">
-            <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl shrink-0">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-emerald-950">100% Parameter Verification Passed</h4>
-              <p className="text-xs text-emerald-800 mt-1">
-                All 7 critical ocean freight fields between SI and Draft BL match perfectly without discrepancy.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {record.status === 'unreadable' && (
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl shadow-2xs flex items-start gap-3">
-            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-amber-950">Uncertainty Detected — Unreadable BL</h4>
-              <p className="text-xs text-amber-800 mt-1">
-                Attachment quality is unreadable or corrupted OCR image. Human review queue required.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* 7-Field Comparison Matrix Table */}
-        {record.fields && (
-          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-blue-600" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 font-mono">
-                  Parameter Comparison Matrix
-                </h3>
-              </div>
-              <span className="text-[11px] font-mono text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                7 / 7 Parameters Extracted
-              </span>
+      {/* Main Content Area */}
+      <div className="p-6 flex-1 space-y-6">
+        {comparison ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+            <div className="px-4 py-3 bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Field Comparison Matrix (SI vs. BL)
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse font-sans">
-                <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-mono text-[11px] uppercase tracking-wider">
-                  <tr>
-                    <th className="py-3 px-4 font-semibold w-1/4">FIELD PARAMETER</th>
-                    <th className="py-3 px-4 font-semibold w-1/3">SI DECLARED VALUE</th>
-                    <th className="py-3 px-4 font-semibold w-1/3">BL DRAFT VALUE</th>
-                    <th className="py-3 px-4 font-semibold text-right">VERDICT</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/60 font-mono text-xs">
-                  {Object.entries(record.fields).map(([key, item]) => (
-                    <tr 
-                      key={key} 
-                      className={`transition-colors ${
-                        item.match 
-                          ? 'hover:bg-slate-50 text-slate-900' 
-                          : 'bg-rose-50/80 hover:bg-rose-100/60 text-slate-900 border-l-4 border-rose-500'
-                      }`}
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 font-mono">
+                  <th className="py-2.5 px-4 font-bold">Field Name</th>
+                  <th className="py-2.5 px-4 font-bold">Shipping Instruction (SI)</th>
+                  <th className="py-2.5 px-4 font-bold">Bill of Lading (BL)</th>
+                  <th className="py-2.5 px-4 font-bold text-center">Match</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono">
+                {Object.entries(comparisons).map(([fieldKey, comp]) => {
+                  const isMatch = comp.match;
+                  const isDefect = isMatch === false;
+                  const isMissing = isMatch === null;
+
+                  return (
+                    <tr
+                      key={fieldKey}
+                      className={
+                        isDefect
+                          ? 'bg-red-50/50'
+                          : isMissing
+                          ? 'bg-amber-50/30'
+                          : 'hover:bg-slate-50/50'
+                      }
                     >
-                      <td className="py-3.5 px-4 font-sans font-semibold text-slate-800">
-                        {item.label}
+                      <td className="py-3 px-4 font-bold text-slate-800">{comp.label}</td>
+                      <td className="py-3 px-4 text-slate-700">
+                        {typeof comp.siValue === 'object'
+                          ? JSON.stringify(comp.siValue)
+                          : String(comp.siValue ?? '—')}
                       </td>
-                      <td className="py-3.5 px-4 text-slate-900 font-medium">{item.siValue}</td>
-                      <td className={`py-3.5 px-4 ${!item.match ? 'text-rose-700 font-bold' : 'text-slate-900 font-medium'}`}>
-                        {item.blValue}
+                      <td className="py-3 px-4 text-slate-700">
+                        {typeof comp.blValue === 'object'
+                          ? JSON.stringify(comp.blValue)
+                          : String(comp.blValue ?? '—')}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        {item.match ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-semibold">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Match
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 border border-rose-200 text-rose-800 text-[10px] font-bold">
-                            <XCircle className="w-3 h-3 text-rose-600" /> Mismatch
-                          </span>
+                      <td className="py-3 px-4 text-center">
+                        {isMatch === true && <Check className="w-4 h-4 text-emerald-600 mx-auto" />}
+                        {isDefect && <X className="w-4 h-4 text-red-600 mx-auto" />}
+                        {isMissing && (
+                          <AlertCircle className="w-4 h-4 text-amber-500 mx-auto" title="Missing field" />
                         )}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="bg-white p-6 rounded-xl border border-slate-200 text-xs text-slate-500 font-mono">
+            No document comparison performed. This email was categorized as{' '}
+            <strong className="text-slate-800">{email.category}</strong>.
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-3 pt-2">
-          <button 
-            onClick={() => onResolveDiscrepancy(record.id)}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-2"
-          >
-            <AlertCircle className="w-4 h-4" />
-            Confirm Mismatch & Dispatch Alert
-          </button>
+        {/* Human Resolution Section */}
+        {(email.automated_status === 'MISMATCH' || email.automated_status === 'NEEDS_REVIEW') && (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-3">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Operator Resolution & Audit Action
+            </h3>
 
-          <button 
-            onClick={() => onEscalate(record.id)}
-            className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl transition-all shadow-2xs"
-          >
-            Send to Human Review Queue
-          </button>
+            <input
+              type="text"
+              placeholder="Add justification or inspection notes..."
+              value={decisionNotes}
+              onChange={(e) => setDecisionNotes(e.target.value)}
+              className="w-full text-xs px-3.5 py-2.5 rounded-lg border border-slate-200 bg-slate-50 focus:outline-none focus:border-blue-500 font-mono"
+            />
 
-          <button 
-            onClick={onOpenSourceModal}
-            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1.5 font-semibold font-mono ml-auto py-2 px-3 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all"
-          >
-            View Raw Attachments (.txt) <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        {/* Processing Trace / LLM Audit Trace */}
-        {record.trace && (
-          <div className="p-5 bg-white border border-slate-200/80 rounded-2xl shadow-2xs">
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3 font-mono">
-              <Activity className="w-3.5 h-3.5 text-blue-600" />
-              Automated Processing & LLM Audit Trace
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => handleAction('REJECTED')}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg cursor-pointer disabled:opacity-50"
+              >
+                <XCircle className="w-4 h-4" />
+                Reject Draft
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAction('APPROVED')}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Approve / Override
+              </button>
             </div>
-            <ul className="space-y-2.5 text-xs text-slate-700 font-mono">
-              {record.trace.map((step, idx) => (
-                <li key={idx} className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-600 mt-1 shrink-0" />
-                  <span className="leading-relaxed">{step}</span>
-                </li>
-              ))}
-            </ul>
           </div>
         )}
-
       </div>
-    </main>
+    </div>
   );
 };
