@@ -21,7 +21,8 @@ coverage" for emails it was never asked to touch. All the actual grading
 math (accuracy/F1/confusion matrices/Cohen's kappa/Jaccard) and the one
 AI-recommendations LLM call are reused unmodified from the_invigilator.py.
 
-Writes stats_bundle/report_card/performance_coach_{x}.txt and
+Writes one combined Excel report card to
+stats_bundle/report_card/performance_coach_{x}.xlsx and a graph to
 stats_bundle/summary_graphs/graph_coach_{x}.png (same x for both, and for
 the uploaded submission_coach_{x}.json).
 """
@@ -55,13 +56,13 @@ from the_invigilator import (  # noqa: E402
     _pct,
     evaluate,
     get_ai_recommendations,
+    render_xlsx,
     render_graphs,
-    render_text,
 )
 
 
 def _next_index(inbox: Inbox) -> int:
-    """Shared counter for performance_coach_{x}.txt, graph_coach_{x}.png,
+    """Shared counter for performance_coach_{x}.xlsx, graph_coach_{x}.png,
     and submission_coach_{x}.json, so a run's three outputs always carry
     the same x. Own counter, independent of the_invigilator.py's."""
     REPORT_CARD_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,7 +71,7 @@ def _next_index(inbox: Inbox) -> int:
 
     x = 1
     while (
-        (REPORT_CARD_DIR / f"performance_coach_{x}.txt").exists()
+        (REPORT_CARD_DIR / f"performance_coach_{x}.xlsx").exists()
         or (SUMMARY_GRAPHS_DIR / f"graph_coach_{x}.png").exists()
         or f"submission_coach_{x}.json" in existing_remote
     ):
@@ -130,17 +131,17 @@ def main():
     report = evaluate(ground_truth_subset, submission)
     recommendations = get_ai_recommendations(report, inbox)
 
-    report_path = REPORT_CARD_DIR / f"performance_coach_{x}.txt"
+    report_path = REPORT_CARD_DIR / f"performance_coach_{x}.xlsx"
     graph_path = SUMMARY_GRAPHS_DIR / f"graph_coach_{x}.png"
 
     stop_reason = f"requested limit of {limit}" if limit is not None else "inbox exhausted or an API/quota error"
-    header = (
-        f"COACH RUN — N={len(submission)} email(s) processed before stopping ({stop_reason})\n"
-        f"Graded against only these {len(submission)} email(s) out of the "
-        f"{len(ground_truth_full)}-email answer key, so coverage below reads "
-        "against that subset, not the full key.\n"
-    )
-    report_path.write_text(header + "\n" + render_text(report, recommendations), encoding="utf-8")
+    extra_summary_rows = [
+        ("Coach run", f"N={len(submission)} email(s) processed before stopping ({stop_reason})"),
+        ("Graded against", f"{len(submission)} of {len(ground_truth_full)} in the answer key "
+                            "(coverage below reads against this subset, not the full key)"),
+    ]
+    render_xlsx(report, recommendations, report_path,
+                title="THE COACH — Pipeline Report Card", extra_summary_rows=extra_summary_rows)
     render_graphs(report, graph_path)
 
     print(f"Wrote {report_path}")
