@@ -58,12 +58,12 @@ python run.py          # serves http://localhost:5000, routes under /api
 ```
 
 The active LLM provider is picked in `backend/app/llm.py` — see the comment
-block at the top of that file. It currently defaults to **Ollama** (local,
-free, no API key): install [Ollama](https://ollama.com/download), then
-`ollama pull llama3.1:8b` before running the backend. To use a hosted
-provider instead (required if you deploy the backend anywhere other than
-your own machine), uncomment the OpenRouter/Gemini/OpenAI block instead and
-set that provider's API key in `.env`.
+block at the top of that file. It defaults to **Google Gemini** (direct,
+`gemini-3.6-flash`): a cloud API anyone on the team can use with just a
+`GEMINI_API_KEY` in `.env`, no local install needed. For free, local,
+no-API-key iteration instead, uncomment the Ollama block: install
+[Ollama](https://ollama.com/download), then `ollama pull qwen2.5:7b` before
+running the backend. OpenRouter/OpenAI are each a one-block swap away too.
 
 **Frontend**
 ```bash
