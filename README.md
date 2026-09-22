@@ -1,4 +1,4 @@
-# Minion Lens
+# MinionLens
 
 An AI-assisted pipeline for a shipping-ops inbox: it classifies incoming
 emails, and for a document-check request, extracts 7 key fields from a
@@ -44,8 +44,8 @@ and the trust/escalation decision are all plain, deterministic code — see
   queue, field-by-field comparison, human review).
 - `stats_bundle/` — evaluation tooling, independent of the running app:
   grades a submission against `ground_truth.json` and writes a scored
-  report card (accuracy/F1/confusion matrices per field). See
-  [`stats_bundle/README.md`](stats_bundle/README.md).
+  report card (accuracy/F1/confusion matrices per field, plus AI-generated
+  improvement suggestions). See [`stats_bundle/README.md`](stats_bundle/README.md).
 
 ## Running it locally
 
@@ -58,23 +58,12 @@ python run.py          # serves http://localhost:5000, routes under /api
 ```
 
 The active LLM provider is picked in `backend/app/llm.py` — see the comment
-block at the top of that file. It currently defaults to **Google Gemini**
-(direct): set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) in `.env`. To
-use a different provider instead — including **Ollama** (local, free, no API
-key: install [Ollama](https://ollama.com/download), then
-`ollama pull llama3.1:8b`) — comment out the active Gemini block and
-uncomment the OpenRouter/OpenAI/Ollama block you want instead, setting that
-provider's API key in `.env` if it needs one.
-
-Batch processing (`stream_batch_process` in `routes.py`, and
-`stats_bundle/the_coach.py`) runs several emails concurrently, but a single
-local Ollama instance still processes one generation at a time by default —
-more client-side threads mostly just keep its queue full rather than truly
-running requests in parallel. If your hardware can handle it, set
-`OLLAMA_NUM_PARALLEL=2` (or higher) as an environment variable before
-`ollama serve` to let Ollama itself generate for multiple requests at once —
-that's the actual lever for faster local-model throughput, not just fewer
-client-side idle gaps between calls.
+block at the top of that file. It currently defaults to **Ollama** (local,
+free, no API key): install [Ollama](https://ollama.com/download), then
+`ollama pull llama3.1:8b` before running the backend. To use a hosted
+provider instead (required if you deploy the backend anywhere other than
+your own machine), uncomment the OpenRouter/Gemini/OpenAI block instead and
+set that provider's API key in `.env`.
 
 **Frontend**
 ```bash

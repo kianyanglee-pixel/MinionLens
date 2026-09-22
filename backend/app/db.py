@@ -114,7 +114,11 @@ def get_pending_review_queue():
     supabase = get_supabase()
     response = (
         supabase.table("emails")
-        .select("*, review_audit_log(*)")
+        # Disambiguated FK: the emails/review_audit_log pair now has two FKs
+        # (an old email_id-only one, plus the newer composite email_id+run_id
+        # one from migrations/003) — PostgREST can't pick one on its own and
+        # errors with PGRST201 unless told explicitly which to embed.
+        .select("*, review_audit_log!review_audit_log_email_run_fkey(*)")
         .in_("automated_status", ["MISMATCH", "NEEDS_REVIEW"])
         .eq("is_processing_failure", False)
         .order("processed_at", desc=True)

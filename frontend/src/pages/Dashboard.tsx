@@ -41,6 +41,7 @@ function reviewReasonLabel(reason?: string | null): string {
 
 export const Dashboard: React.FC = () => {
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [runsLoadError, setRunsLoadError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [emails, setEmails] = useState<EmailRecord[]>([]);
@@ -93,14 +94,18 @@ export const Dashboard: React.FC = () => {
     try {
       const res = await fetch('/api/runs');
       const data = await res.json();
-      if (res.ok && data.status === 'success' && data.runs.length > 0) {
+      if (res.ok && data.status === 'success') {
+        setRunsLoadError(null);
         setRuns(data.runs);
-        if (!activeRunId) {
+        if (!activeRunId && data.runs.length > 0) {
           loadBatch(data.runs[0].run_id);
         }
+      } else {
+        setRunsLoadError(data.message || 'Backend returned an error while loading run history.');
       }
     } catch (err) {
       console.error('Failed to load runs:', err);
+      setRunsLoadError("Can't reach the backend — is it running on http://127.0.0.1:5000?");
     }
   };
 
@@ -364,6 +369,19 @@ export const Dashboard: React.FC = () => {
             <div className="mt-5 text-[10px] font-bold text-slate-400 tracking-wider uppercase shrink-0">
               BATCH INGESTION RUNS
             </div>
+
+            {runsLoadError && (
+              <div className="mt-2 p-2 rounded-lg bg-red-50 border border-red-100 text-[11px] text-red-700 flex items-start gap-1.5 shrink-0">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{runsLoadError}</span>
+              </div>
+            )}
+
+            {!runsLoadError && runs.length === 0 && (
+              <div className="mt-2 text-[11px] text-slate-400 shrink-0">
+                No runs yet — start one above.
+              </div>
+            )}
 
             <div className="mt-2 flex-1 overflow-y-auto space-y-1.5 pr-1">
               {runs.map((batch) => {

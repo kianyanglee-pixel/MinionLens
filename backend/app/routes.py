@@ -575,7 +575,8 @@ def get_latest_run():
         return jsonify({"status": "error", "message": "No runs found"}), 404
 
     run = run_res.data[0]
-    emails_res = supabase.table("emails").select("*, review_audit_log(*)").eq("run_id", run["run_id"]).order("processed_at", desc=False).execute()
+    # Disambiguated FK — see db.py's get_pending_review_queue() for why.
+    emails_res = supabase.table("emails").select("*, review_audit_log!review_audit_log_email_run_fkey(*)").eq("run_id", run["run_id"]).order("processed_at", desc=False).execute()
     return jsonify({"status": "success", "run": run, "emails": emails_res.data or []})
 
 @bp.route("/runs/<run_id>", methods=["GET"])
@@ -585,7 +586,7 @@ def get_run_details(run_id):
     if not run_res.data:
         return jsonify({"status": "error", "message": "Run not found"}), 404
 
-    emails_res = supabase.table("emails").select("*, review_audit_log(*)").eq("run_id", run_id).order("processed_at", desc=False).execute()
+    emails_res = supabase.table("emails").select("*, review_audit_log!review_audit_log_email_run_fkey(*)").eq("run_id", run_id).order("processed_at", desc=False).execute()
     return jsonify({"status": "success", "run": run_res.data, "emails": emails_res.data or []})
 
 @bp.route("/reviews", methods=["GET"])
