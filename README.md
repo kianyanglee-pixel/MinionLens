@@ -58,12 +58,13 @@ python run.py          # serves http://localhost:5000, routes under /api
 ```
 
 The active LLM provider is picked in `backend/app/llm.py` — see the comment
-block at the top of that file. It currently defaults to **Ollama** (local,
-free, no API key): install [Ollama](https://ollama.com/download), then
-`ollama pull llama3.1:8b` before running the backend. To use a hosted
-provider instead (required if you deploy the backend anywhere other than
-your own machine), uncomment the OpenRouter/Gemini/OpenAI block instead and
-set that provider's API key in `.env`.
+block at the top of that file. It currently defaults to **Google Gemini**
+(direct): set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) in `.env`. To
+use a different provider instead — including **Ollama** (local, free, no API
+key: install [Ollama](https://ollama.com/download), then
+`ollama pull llama3.1:8b`) — comment out the active Gemini block and
+uncomment the OpenRouter/OpenAI/Ollama block you want instead, setting that
+provider's API key in `.env` if it needs one.
 
 Batch processing (`stream_batch_process` in `routes.py`, and
 `stats_bundle/the_coach.py`) runs several emails concurrently, but a single
