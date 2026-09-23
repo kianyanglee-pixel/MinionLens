@@ -4,6 +4,7 @@ import {
   Cloud, Database, CheckCircle2, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
 import JSZip from 'jszip';
+import { apiUrl } from '../api';
 
 interface FileUploadProps {
   onStartStream: (runId: string, totalCount: number) => void;
@@ -33,7 +34,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   const [dbKey, setDbKey] = useState('');
 
   useEffect(() => {
-    fetch('/api/config')
+    fetch(apiUrl('/api/config'))
       .then((res) => res.json())
       .then((data) => {
         if (data.status === 'success' && data.default_supabase_url) {
@@ -102,10 +103,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         formData.append('started_at', startedAt);
         formData.append('email_count', String(inboxFiles.length));
 
-        res = await fetch('/api/ingest', { method: 'POST', body: formData });
+        res = await fetch(apiUrl('/api/ingest'), { method: 'POST', body: formData });
       } else if (sourceType === 'database') {
         setUploadStatusMsg('Reading dataset already in the database...');
-        res = await fetch('/api/ingest', {
+        res = await fetch(apiUrl('/api/ingest'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -117,7 +118,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         });
       } else {
         setUploadStatusMsg(`Syncing from remote ${sourceType}...`);
-        res = await fetch('/api/ingest', {
+        res = await fetch(apiUrl('/api/ingest'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

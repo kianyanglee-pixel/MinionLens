@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:5000', // Change to your Flask port (e.g., 5000 or 8000)
+        target: process.env.VITE_API_URL || 'https://your-backend.onrender.com', // Change to your Flask port (e.g., 5000 or 8000)
         changeOrigin: true,
         secure: false,
       },

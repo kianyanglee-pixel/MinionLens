@@ -16,7 +16,11 @@
 -- already created). Kept only for projects that ran 001 before that edit
 -- and still need to migrate forward from the old email_id-only key.
 
+-- Older databases may have either the email_id-only foreign key or the
+-- composite foreign key. Both depend on the current primary-key index and
+-- must be removed before replacing it.
 alter table review_audit_log drop constraint if exists review_audit_log_email_id_fkey;
+alter table review_audit_log drop constraint if exists review_audit_log_email_run_fkey;
 
 alter table emails drop constraint if exists emails_pkey;
 alter table emails add primary key (email_id, run_id);

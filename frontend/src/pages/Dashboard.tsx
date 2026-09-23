@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { FileUpload } from '../components/FileUpload';
 import { RunSummary, EmailRecord, OriginalEmail } from '../batch';
+import { apiUrl } from '../api';
 
 function formatBatchDate(isoString?: string) {
   if (!isoString) return 'Recent Batch';
@@ -92,7 +93,7 @@ export const Dashboard: React.FC = () => {
 
   const fetchRunsList = async () => {
     try {
-      const res = await fetch('/api/runs');
+      const res = await fetch(apiUrl('/api/runs'));
       const data = await res.json();
       if (res.ok && data.status === 'success') {
         setRunsLoadError(null);
@@ -112,7 +113,7 @@ export const Dashboard: React.FC = () => {
   const loadBatch = async (runId: string) => {
     setActiveRunId(runId);
     try {
-      const res = await fetch(`/api/runs/${runId}`);
+      const res = await fetch(apiUrl(`/api/runs/${runId}`));
       const data = await res.json();
       if (res.ok && data.status === 'success') {
         setSelectedRun(data.run);
@@ -148,7 +149,7 @@ export const Dashboard: React.FC = () => {
       eventSourceRef.current.close();
     }
 
-    const es = new EventSource(`/api/stream-process?run_id=${encodeURIComponent(runId)}`);
+    const es = new EventSource(apiUrl(`/api/stream-process?run_id=${encodeURIComponent(runId)}`));
     eventSourceRef.current = es;
 
     es.onmessage = (event) => {
@@ -224,7 +225,7 @@ export const Dashboard: React.FC = () => {
       // directly. The backend already resolves decisively whenever
       // `decision` is present (db.py's resolve_review_item), so just pass
       // it through as given.
-      const res = await fetch(`/api/reviews/${encodeURIComponent(selectedEmail.email_id)}/resolve`, {
+      const res = await fetch(apiUrl(`/api/reviews/${encodeURIComponent(selectedEmail.email_id)}/resolve`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -265,7 +266,7 @@ export const Dashboard: React.FC = () => {
     const runSuffix = activeRunId ? `run_id=${encodeURIComponent(activeRunId)}` : '';
     try {
       const originalRes = await fetch(
-        `/api/emails/${encodeURIComponent(selectedEmail.email_name)}/original${runSuffix ? `?${runSuffix}` : ''}`
+        apiUrl(`/api/emails/${encodeURIComponent(selectedEmail.email_name)}/original${runSuffix ? `?${runSuffix}` : ''}`)
       );
       const originalData = await originalRes.json();
       const original: OriginalEmail | null = originalData.status === 'success' ? originalData : null;
@@ -276,14 +277,14 @@ export const Dashboard: React.FC = () => {
 
       if (cmp?.si_path) {
         const r = await fetch(
-          `/api/attachments/content?path=${encodeURIComponent(cmp.si_path)}${runSuffix ? `&${runSuffix}` : ''}`
+          apiUrl(`/api/attachments/content?path=${encodeURIComponent(cmp.si_path)}${runSuffix ? `&${runSuffix}` : ''}`)
         );
         const d = await r.json();
         si = d.status === 'success' ? d.content : null;
       }
       if (cmp?.bl_path) {
         const r = await fetch(
-          `/api/attachments/content?path=${encodeURIComponent(cmp.bl_path)}${runSuffix ? `&${runSuffix}` : ''}`
+          apiUrl(`/api/attachments/content?path=${encodeURIComponent(cmp.bl_path)}${runSuffix ? `&${runSuffix}` : ''}`)
         );
         const d = await r.json();
         bl = d.status === 'success' ? d.content : null;
