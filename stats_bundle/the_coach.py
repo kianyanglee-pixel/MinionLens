@@ -120,7 +120,7 @@ def _process_one(inbox: Inbox, email: dict, run_id: str):
     return result["email_id"], submission_entry
 
 
-def _run_parallel(inbox: Inbox, run_id: str, limit: int = None, max_workers: int = 9) -> dict:
+def _run_parallel(inbox: Inbox, run_id: str, limit: int = None, max_workers: int = 3) -> dict:
     """Processes up to `limit` emails (or the whole inbox) concurrently —
     max_workers=3 matches the real app's stream_batch_process() (routes.py)
     pool size, kept conservative since each worker holds an LLM call in
