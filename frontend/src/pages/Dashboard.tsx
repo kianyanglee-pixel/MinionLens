@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { FileUpload } from '../components/FileUpload';
 import { RunSummary, EmailRecord, OriginalEmail } from '../batch';
-import { apiUrl } from '../api';
+import { apiUrl, readJson } from '../api';
 
 function formatBatchDate(isoString?: string) {
   if (!isoString) return 'Recent Batch';
@@ -94,7 +94,7 @@ export const Dashboard: React.FC = () => {
   const fetchRunsList = async () => {
     try {
       const res = await fetch(apiUrl('/api/runs'));
-      const data = await res.json();
+      const data = await readJson<{ status?: string; runs: RunRecord[]; message?: string }>(res);
       if (res.ok && data.status === 'success') {
         setRunsLoadError(null);
         setRuns(data.runs);
@@ -114,7 +114,7 @@ export const Dashboard: React.FC = () => {
     setActiveRunId(runId);
     try {
       const res = await fetch(apiUrl(`/api/runs/${runId}`));
-      const data = await res.json();
+      const data = await readJson<{ status?: string; run: RunRecord; emails: EmailRecord[] }>(res);
       if (res.ok && data.status === 'success') {
         setSelectedRun(data.run);
         setEmails(data.emails);

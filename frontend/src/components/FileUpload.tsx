@@ -4,7 +4,7 @@ import {
   Cloud, Database, CheckCircle2, AlertCircle, ArrowRight, Loader2
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { apiUrl } from '../api';
+import { apiUrl, readJson } from '../api';
 
 interface FileUploadProps {
   onStartStream: (runId: string, totalCount: number) => void;
@@ -134,7 +134,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         });
       }
 
-      const data = await res.json();
+      const data = await readJson<{ status?: string; run_id?: string; message?: string; inbox_count?: number; inbox_downloaded?: number }>(res);
 
       if (res.ok && data.status === 'success' && data.run_id) {
         const count = data.inbox_count || data.inbox_downloaded || inboxFiles.length;
@@ -185,14 +185,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
       </div>
 
       <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-        <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
-          Your Gemini API key <span className="normal-case font-sans text-slate-400">(optional)</span>
+          <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+          Gemini API key <span className="normal-case font-sans text-slate-400">(required on the server or for this run)</span>
         </label>
         <input
           type="password"
           value={llmApiKey}
           onChange={(e) => setLlmApiKey(e.target.value)}
-          placeholder="Leave blank to use the server's Gemini key"
+          placeholder="Required unless the server has GEMINI_API_KEY"
           autoComplete="off"
           className="w-full px-3 py-2 text-xs border border-amber-300 rounded-xl font-mono text-slate-800 bg-white focus:outline-none focus:border-amber-500"
         />

@@ -53,14 +53,15 @@ and the trust/escalation decision are all plain, deterministic code — see
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env   # fill in SUPABASE_URL / SUPABASE_KEY at minimum
+cp .env.example .env   # fill in SUPABASE_URL / SUPABASE_KEY and the compulsory GEMINI_API_KEY
 python run.py          # serves http://localhost:5000, routes under /api
 ```
 
 The active LLM provider is picked in `backend/app/llm.py` — see the comment
 block at the top of that file. It defaults to **Google Gemini** (direct,
-`gemini-3.6-flash`): a cloud API anyone on the team can use with just a
-`GEMINI_API_KEY` in `.env`, no local install needed. For free, local,
+`gemini-3.6-flash`). A `GEMINI_API_KEY` is compulsory for processing; put it
+in `backend/.env`, or provide a key in the upload screen for a single run.
+No local install is needed. For free, local,
 no-API-key iteration instead, uncomment the Ollama block: install
 [Ollama](https://ollama.com/download), then `ollama pull qwen2.5:7b` before
 running the backend. OpenRouter/OpenAI are each a one-block swap away too.
