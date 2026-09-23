@@ -42,23 +42,24 @@ def _fields_from_result(result) -> dict:
     return {name: result.get(name) for name in FIELD_NAMES}
 
 
-def _extract_from_text(text: str):
+def _extract_from_text(text: str, llm_api_key: str | None = None):
     """One document, one LLM call. Returns the 7-field dict, or None if the
     call succeeded but its response couldn't be parsed as JSON — a
     processing failure, distinct from a content problem (§2.4-F)."""
-    result = ask_json(EXTRACT_SYSTEM_PROMPT, text)
+    result = ask_json(EXTRACT_SYSTEM_PROMPT, text, api_key=llm_api_key)
     if result.get("error") == "invalid_json":
         return None
     return _fields_from_result(result)
 
 
-def _extract_pair_from_text(si_text: str, bl_text: str):
+def _extract_pair_from_text(si_text: str, bl_text: str, llm_api_key: str | None = None):
     """Both documents, ONE combined LLM call (§6.4) instead of two separate
     calls — halves extraction cost/latency for every BL_COMPARISON email.
     Returns (si_fields, bl_fields), or (None, None) on a parse failure."""
     result = ask_json(
         EXTRACT_PAIR_SYSTEM_PROMPT,
         f"--- SI document ---\n{si_text}\n\n--- BL document ---\n{bl_text}",
+        api_key=llm_api_key,
     )
     if result.get("error") == "invalid_json":
         return None, None
@@ -135,17 +136,17 @@ def _fields_result(att_path, text, fields):
     return _result(att_path, ok=True, error=None, fields=fields, found=found, text=text)
 
 
-def extract_fields(inbox, att_path: str) -> dict:
+def extract_fields(inbox, att_path: str, llm_api_key: str | None = None) -> dict:
     """Single-document extraction — one LLM call for one attachment. Use
     extract_field_pair() for a BL_COMPARISON email's SI+BL pair instead,
     which combines both into a single call (§6.4)."""
     text, failure = _document_text(inbox, att_path)
     if failure:
         return failure
-    return _fields_result(att_path, text, _extract_from_text(text))
+    return _fields_result(att_path, text, _extract_from_text(text, llm_api_key))
 
 
-def extract_field_pair(inbox, si_path: str, bl_path: str):
+def extract_field_pair(inbox, si_path: str, bl_path: str, llm_api_key: str | None = None):
     """Extracts both the SI and BL documents' 7 fields in one combined LLM
     call (§6.4) instead of two separate calls. Falls back to a single-
     document call for whichever side is readable if the other side can't be
@@ -158,9 +159,9 @@ def extract_field_pair(inbox, si_path: str, bl_path: str):
     if si_failure and bl_failure:
         return si_failure, bl_failure
     if si_failure:
-        return si_failure, _fields_result(bl_path, bl_text, _extract_from_text(bl_text))
+        return si_failure, _fields_result(bl_path, bl_text, _extract_from_text(bl_text, llm_api_key))
     if bl_failure:
-        return _fields_result(si_path, si_text, _extract_from_text(si_text)), bl_failure
+        return _fields_result(si_path, si_text, _extract_from_text(si_text, llm_api_key)), bl_failure
 
-    si_fields, bl_fields = _extract_pair_from_text(si_text, bl_text)
+    si_fields, bl_fields = _extract_pair_from_text(si_text, bl_text, llm_api_key)
     return _fields_result(si_path, si_text, si_fields), _fields_result(bl_path, bl_text, bl_fields)

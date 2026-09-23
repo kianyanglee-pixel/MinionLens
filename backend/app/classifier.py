@@ -30,7 +30,7 @@ Think through which category fits before answering. Respond with strict JSON in 
 {"reason": "<one short sentence explaining the decision>", "category": "<one of the five>", "confidence": "high"|"medium"|"low"}."""
 
 
-def classify_email(email: dict) -> dict:
+def classify_email(email: dict, llm_api_key: str | None = None) -> dict:
     attachment_names = [path.split("/")[-1] for path in email.get("attachments", [])]
     user_prompt = (
         f"Attachment filenames: {attachment_names}\n"
@@ -38,7 +38,7 @@ def classify_email(email: dict) -> dict:
         f"Subject: {email.get('subject', '')}\n"
         f"Body:\n{email.get('body', '')}"
     )
-    result = ask_json(CLASSIFY_SYSTEM_PROMPT, user_prompt)
+    result = ask_json(CLASSIFY_SYSTEM_PROMPT, user_prompt, api_key=llm_api_key)
 
     if result.get("error") == "invalid_json":
         # The LLM call succeeded but its response couldn't be parsed — a

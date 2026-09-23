@@ -83,7 +83,7 @@ def _literal_match(value, source_text) -> bool:
     )
 
 
-def _grounding_verify(value, source_text) -> str:
+def _grounding_verify(value, source_text, llm_api_key: str | None = None) -> str:
     """Grounding Verifier: LLM call, only for a value the Literal Match Check
     couldn't resolve — confirms whether a normalized/converted value is still
     attributable to its source document (§2.4-B). Never compares SI to BL —
@@ -91,19 +91,20 @@ def _grounding_verify(value, source_text) -> str:
     verdict = ask_json(
         GROUNDING_SYSTEM_PROMPT,
         f"Extracted value: {value}\n\nSource document text:\n{source_text}",
+        api_key=llm_api_key,
     )
     result = verdict.get("verdict")
     return result if result in ("confirmed", "not_found", "ambiguous") else "ambiguous"
 
 
-def _grounded(value, source_text) -> bool:
+def _grounded(value, source_text, llm_api_key: str | None = None) -> bool:
     """Is a single extracted value trustworthy: found literally in its own
     source text, or confirmed by the Grounding Verifier when it isn't."""
     if value is None:
         return False
     if _literal_match(value, source_text):
         return True
-    return _grounding_verify(value, source_text) == "confirmed"
+    return _grounding_verify(value, source_text, llm_api_key) == "confirmed"
 
 
 def _parse_container_count(value, source_text):
@@ -185,7 +186,7 @@ def _needs_review(reason: str, field_comparisons=None) -> dict:
     }
 
 
-def compare_documents(si_result: dict, bl_result: dict) -> dict:
+def compare_documents(si_result: dict, bl_result: dict, llm_api_key: str | None = None) -> dict:
     if si_result.get("processing_failure") or bl_result.get("processing_failure"):
         # A system fault (LLM call failed after retries, a parser threw) —
         # kept visibly separate from the four content review_reason values,
@@ -226,7 +227,7 @@ def compare_documents(si_result: dict, bl_result: dict) -> dict:
             match = _compare_container_count(si_value, bl_value, si_text, bl_text)
         elif name == "gross_weight_kg":
             match = _compare_weight(si_value, bl_value)
-        elif not _grounded(si_value, si_text) or not _grounded(bl_value, bl_text):
+        elif not _grounded(si_value, si_text, llm_api_key) or not _grounded(bl_value, bl_text, llm_api_key):
             # Neither the Literal Match Check nor the Grounding Verifier
             # could confirm this value is attributable to its own source —
             # low-confidence, route to review rather than guess (§2.4-B).

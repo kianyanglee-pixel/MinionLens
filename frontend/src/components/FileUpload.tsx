@@ -32,6 +32,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   // other Supabase project instead.
   const [dbUrl, setDbUrl] = useState('');
   const [dbKey, setDbKey] = useState('');
+  const [llmApiKey, setLlmApiKey] = useState('');
 
   useEffect(() => {
     fetch(apiUrl('/api/config'))
@@ -102,6 +103,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
         formData.append('batch_archive', zipBlob, 'batch.zip');
         formData.append('started_at', startedAt);
         formData.append('email_count', String(inboxFiles.length));
+        if (llmApiKey.trim()) formData.append('llm_api_key', llmApiKey.trim());
 
         res = await fetch(apiUrl('/api/ingest'), { method: 'POST', body: formData });
       } else if (sourceType === 'database') {
@@ -114,6 +116,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
             started_at: startedAt,
             supabase_url: dbUrl.trim(),
             supabase_key: dbKey.trim(),
+            llm_api_key: llmApiKey.trim() || undefined,
           })
         });
       } else {
@@ -125,7 +128,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
             source_type: sourceType,
             started_at: startedAt,
             inbox_uri: sourceType === 'cloud' ? cloudInboxUri : driveInboxUrl,
-            attachments_uri: sourceType === 'cloud' ? cloudAttachmentsUri : driveAttachmentsUrl
+            attachments_uri: sourceType === 'cloud' ? cloudAttachmentsUri : driveAttachmentsUrl,
+            llm_api_key: llmApiKey.trim() || undefined,
           })
         });
       }
@@ -178,6 +182,23 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+        <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+          Your Gemini API key <span className="normal-case font-sans text-slate-400">(optional)</span>
+        </label>
+        <input
+          type="password"
+          value={llmApiKey}
+          onChange={(e) => setLlmApiKey(e.target.value)}
+          placeholder="Leave blank to use the server's Gemini key"
+          autoComplete="off"
+          className="w-full px-3 py-2 text-xs border border-amber-300 rounded-xl font-mono text-slate-800 bg-white focus:outline-none focus:border-amber-500"
+        />
+        <p className="text-[11px] text-amber-800/70 mt-1 font-mono">
+          Sent over HTTPS for this run only. It is not saved in the database or batch files.
+        </p>
       </div>
 
       {/* 1. LOCAL DIRECTORY MODE */}

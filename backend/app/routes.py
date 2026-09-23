@@ -34,6 +34,10 @@ from app.db import (
 
 bp = Blueprint("api", __name__)
 
+# User-provided LLM keys live only for the duration of a processing run.
+# They are never written to Supabase, batch files, or response payloads.
+_RUN_LLM_KEYS: dict[str, str | None] = {}
+
 DOC_COMPARISON_CATEGORY = "BL_COMPARISON"
 
 
@@ -115,9 +119,9 @@ def _processing_failure_result():
         "field_comparisons": {},
     }
 
-def process_email(inbox, email):
+def process_email(inbox, email, llm_api_key: str | None = None):
     try:
-        classification = classify_email(email)
+        classification = classify_email(email, llm_api_key)
     except Exception as exc:
         return {
             "email_id": email.get("email_id"),
@@ -151,8 +155,8 @@ def process_email(inbox, email):
     else:
         try:
             # Use teammate's optimized single-prompt pair extractor
-            si_result, bl_result = extract_field_pair(inbox, si_path, bl_path)
-            comparison = compare_documents(si_result, bl_result)
+            si_result, bl_result = extract_field_pair(inbox, si_path, bl_path, llm_api_key)
+            comparison = compare_documents(si_result, bl_result, llm_api_key)
             comparison["si_path"] = si_path
             comparison["bl_path"] = bl_path
         except Exception:
@@ -175,7 +179,7 @@ def process_email(inbox, email):
         "processing_failure": classification.get("processing_failure", False) or (comparison.get("processing_failure", False) if comparison else False)
     }
 
-def _process_and_save_worker(inbox, email_data, run_id: str, dedup_suffix: str = ""):
+def _process_and_save_worker(inbox, email_data, run_id: str, dedup_suffix: str = "", llm_api_key: str | None = None):
     raw_id = str(email_data.get("email_id") or "email_unknown")
     email_name = raw_id.replace(".json", "") + dedup_suffix
     # Bare id, not run_id-prefixed — the emails table's real key is the
@@ -186,7 +190,7 @@ def _process_and_save_worker(inbox, email_data, run_id: str, dedup_suffix: str =
     # now that the same bare email_id can legitimately appear in many runs.
     email_id = email_name
 
-    result = process_email(inbox, email_data)
+    result = process_email(inbox, email_data, llm_api_key)
     # `or "GENERAL"`, not `.get(..., "GENERAL")` — a processing failure
     # (classify_email raised, or returned invalid_json) sets category to an
     # explicit None, which .get()'s default wouldn't catch, and `category`
@@ -319,9 +323,15 @@ def get_config():
 # ==========================================
 @bp.route("/ingest", methods=["POST"])
 def ingest_batch():
+    request_data = request.get_json(silent=True) or {}
+    llm_api_key = (
+        request.form.get("llm_api_key")
+        or request_data.get("llm_api_key")
+        or ""
+    ).strip() or None
     started_at = (
         request.form.get("started_at") 
-        or (request.get_json(silent=True) or {}).get("started_at") 
+        or request_data.get("started_at")
         or datetime.now(timezone.utc).isoformat()
     )
 
@@ -331,6 +341,7 @@ def ingest_batch():
         email_count = int(request.form.get("email_count", 0))
 
         run_id = init_run_record(started_at=started_at, email_count=email_count)
+        _RUN_LLM_KEYS[run_id] = llm_api_key
         in_count, att_count = extract_zip_for_batch(run_id, zip_file)
 
         return jsonify({
@@ -347,6 +358,7 @@ def ingest_batch():
         attachment_files = request.files.getlist("attachment_files")
 
         run_id = init_run_record(started_at=started_at, email_count=len(inbox_files))
+        _RUN_LLM_KEYS[run_id] = llm_api_key
         in_count, att_count = save_uploaded_files_for_batch(run_id, inbox_files, attachment_files)
 
         return jsonify({
@@ -358,7 +370,7 @@ def ingest_batch():
         })
 
     # 3. Cloud (S3/GCS) & Google Drive Ingestion
-    data = request.get_json(silent=True) or {}
+    data = request_data
     source_type = data.get("source_type") or request.form.get("source_type")
     inbox_uri = data.get("inbox_uri", "") or request.form.get("inbox_uri", "")
     attachments_uri = data.get("attachments_uri", "") or request.form.get("attachments_uri", "")
@@ -390,6 +402,7 @@ def ingest_batch():
             return jsonify({"status": "error", "message": f"Could not connect to that database: {e}"}), 400
 
         run_id = init_run_record(started_at=started_at, email_count=in_count)
+        _RUN_LLM_KEYS[run_id] = llm_api_key
         if custom_url or custom_key:
             _save_custom_db_source(run_id, custom_url, custom_key)
 
@@ -403,6 +416,7 @@ def ingest_batch():
 
     if source_type in ("cloud", "drive"):
         run_id = init_run_record(started_at=started_at, email_count=0)
+        _RUN_LLM_KEYS[run_id] = llm_api_key
         batch_root, inbox_dir, attachments_dir = get_batch_dirs(run_id)
 
         try:
@@ -487,6 +501,7 @@ def stream_batch_process():
         return {"status": "error", "message": "run_id is required"}, 400
 
     def generate_events():
+        llm_api_key = _RUN_LLM_KEYS.get(run_id)
         inbox = _resolve_inbox_for_run(run_id)
         emails = inbox.emails()
         total_emails = len(emails)
@@ -526,7 +541,7 @@ def stream_batch_process():
         # keep this at 3 or lower — see README's OLLAMA_NUM_PARALLEL note.
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
-                executor.submit(_process_and_save_worker, inbox, email, run_id, dedup_suffixes[i]): email
+                executor.submit(_process_and_save_worker, inbox, email, run_id, dedup_suffixes[i], llm_api_key): email
                 for i, email in enumerate(emails)
             }
 
@@ -546,6 +561,7 @@ def stream_batch_process():
                 yield f"data: {json.dumps({'stage': 'PROCESSING', 'message': msg, 'current': completed_count, 'total': total_emails})}\n\n"
 
         finalize_run_record(run_id, counts)
+        _RUN_LLM_KEYS.pop(run_id, None)
         yield f"data: {json.dumps({'stage': 'DONE', 'message': f'Batch complete! Processed {total_emails} emails.', 'current': total_emails, 'total': total_emails})}\n\n"
 
     return Response(

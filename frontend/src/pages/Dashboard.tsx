@@ -106,7 +106,7 @@ export const Dashboard: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load runs:', err);
-      setRunsLoadError("Can't reach the backend — is it running on http://127.0.0.1:5000?");
+      setRunsLoadError("Can't reach the backend — check VITE_API_URL and the Render service status.");
     }
   };
 

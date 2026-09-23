@@ -27,14 +27,14 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 # )
 # DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
-# -- Google Gemini (direct) ----------------------------------------------------
-# Needs GEMINI_API_KEY (and optionally GEMINI_MODEL) in .env. Cloud-hosted —
-# works for anyone with a key, no local install needed (unlike Ollama below).
-# from google import genai
-# from google.genai import errors, types
-#
-# client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-# DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# -- Google Gemini (direct) (ACTIVE) -------------------------------------------
+# Needs GEMINI_API_KEY (and optionally GEMINI_MODEL) in .env or Render.
+from google import genai
+from google.genai import errors, types
+
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+_default_api_key = os.getenv("GEMINI_API_KEY")
+_default_client = genai.Client(api_key=_default_api_key) if _default_api_key else None
 
 # -- OpenAI (direct) ----------------------------------------------------------
 # Needs OPENAI_API_KEY (and optionally OPENAI_MODEL) in .env.
@@ -43,7 +43,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 # client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-# -- Ollama (local) (ACTIVE) ---------------------------------------------------
+# -- Ollama (local) ------------------------------------------------------------
 # Runs entirely on your own machine via `ollama serve` (default port 11434) —
 # free, no API key, and no rate limit/quota from a third party, since nothing
 # leaves your computer. Trade-off: speed and output quality depend on your
@@ -56,13 +56,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 503}
 # NOTE: this only works for local development — a cloud-hosted backend
 # (Render/Railway/etc.), or a teammate without Ollama installed, needs one of
 # the cloud provider blocks above instead.
-from openai import OpenAI
-
-client = OpenAI(
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-    api_key="ollama",  # unused by Ollama, but the client requires a value
-)
-DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+# Ollama is intentionally disabled for the deployed backend.
 
 
 # -- ask_json for the Gemini (direct) block above, if you switch to it -------
@@ -98,35 +92,40 @@ DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 #         return {"error": "invalid_json", "raw": getattr(response, "text", "")}
 
 
-# -- ask_json for the OpenRouter/OpenAI/Ollama blocks above (ACTIVE) --------
-# -- (all three go through the `openai` package's chat.completions API, so --
-# -- this one body covers whichever is uncommented above) -------------------
-# -- NOTE for Ollama specifically: not every local model reliably honors
-# -- response_format={"type": "json_object"} the way hosted models do — if
-# -- you see a lot of {"error": "invalid_json"} results, try a model known
-# -- for good JSON-mode support (qwen2.5 and llama3.1 both do) before
-# -- assuming it's a bug.
-def ask_json(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL) -> dict:
+# -- Active Gemini JSON call ---------------------------------------------------
+def ask_json(
+    system_prompt: str,
+    user_prompt: str,
+    model: str = DEFAULT_MODEL,
+    api_key: str | None = None,
+) -> dict:
+    active_client = genai.Client(api_key=api_key) if api_key else _default_client
+    if active_client is None:
+        raise RuntimeError("No Gemini API key configured. Add one in the UI or GEMINI_API_KEY on the server.")
+
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.chat.completions.create(
+            response = active_client.models.generate_content(
                 model=model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    temperature=0,
+                ),
             )
             break
-        except Exception as e:
-            status = getattr(e, "status_code", None)
+        except errors.APIError as error:
+            status = getattr(error, "code", None)
             if status not in RETRYABLE_STATUS_CODES or attempt == MAX_RETRIES - 1:
                 raise
             time.sleep(2 ** attempt)
+        except Exception:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)
 
-    content = response.choices[0].message.content
     try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        return {"error": "invalid_json", "raw": content}
+        return json.loads(response.text)
+    except (json.JSONDecodeError, AttributeError):
+        return {"error": "invalid_json", "raw": getattr(response, "text", "")}
