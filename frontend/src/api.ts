@@ -12,7 +12,8 @@ export async function readJson<T>(response: Response): Promise<T> {
   } catch {
     const preview = body.replace(/\s+/g, ' ').slice(0, 120);
     throw new Error(
-      `Backend returned ${response.status} ${response.statusText} instead of JSON${preview ? `: ${preview}` : '.'}`
+      `Backend returned ${response.status} ${response.statusText || ''} instead of JSON` +
+      `${preview ? `: ${preview}` : '.'}`
     );
   }
 }
