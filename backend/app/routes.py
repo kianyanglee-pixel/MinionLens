@@ -329,6 +329,12 @@ def ingest_batch():
         or request_data.get("llm_api_key")
         or ""
     ).strip() or None
+    if not llm_api_key:
+        return jsonify({
+            "status": "error",
+            "message": "A Gemini API key is required for every verification run.",
+        }), 400
+
     started_at = (
         request.form.get("started_at") 
         or request_data.get("started_at")

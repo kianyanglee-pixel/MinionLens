@@ -303,30 +303,28 @@ export const Dashboard: React.FC = () => {
   };
 
   return (
-    // Desktop-only for this hackathon build (PRD §4.8 item 9) — a stated
-    // requirement, not an accident, rather than a real responsive rebuild.
-    <div className="h-screen w-screen min-w-[1280px] flex flex-col bg-[#fcfcfd] text-[#1e293b] font-sans antialiased select-none overflow-x-auto">
+    <div className="min-h-screen h-screen w-full min-w-0 flex flex-col bg-[#fcfcfd] text-[#1e293b] font-sans antialiased select-none overflow-hidden">
 
       {/* 1. TOP NAVBAR */}
-      <header className="h-14 border-b border-slate-200 bg-white px-6 flex items-center justify-between shrink-0">
+      <header className="min-h-14 border-b border-slate-200 bg-white px-3 sm:px-6 py-2 flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-2 text-slate-900 font-bold text-base tracking-tight">
             <img src="/logo.png" alt="MinionLens" className="w-10 h-10 object-contain" />
             <span>MinionLens</span>
           </div>
-          <span className="text-slate-300 font-light mx-1">|</span>
-          <span className="text-xs text-slate-500 font-medium">Document Verification</span>
+          <span className="hidden sm:inline text-slate-300 font-light mx-1">|</span>
+          <span className="hidden sm:inline text-xs text-slate-500 font-medium">Document Verification</span>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="relative">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <div className="relative hidden sm:block">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
               placeholder="Search emails or fields"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64 pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-400 text-slate-700"
+              className="w-48 md:w-64 pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-400 text-slate-700"
             />
           </div>
           <button className="text-slate-400 hover:text-slate-600">
@@ -339,10 +337,10 @@ export const Dashboard: React.FC = () => {
       </header>
 
       {/* 2. THREE-COLUMN MAIN BODY */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
 
         {/* COLUMN 1: LEFT SIDEBAR (DYNAMIC TRACK PROGRESS BUTTON) */}
-        <aside className="w-64 border-r border-slate-200 bg-white p-4 flex flex-col justify-between shrink-0">
+        <aside className="w-full md:w-64 max-h-[36vh] md:max-h-none border-b md:border-b-0 md:border-r border-slate-200 bg-white p-3 sm:p-4 flex flex-col justify-between shrink-0">
           <div className="flex-1 flex flex-col overflow-hidden">
             {isProcessing ? (
               <button
@@ -384,7 +382,7 @@ export const Dashboard: React.FC = () => {
               </div>
             )}
 
-            <div className="mt-2 flex-1 overflow-y-auto space-y-1.5 pr-1">
+            <div className="mt-2 flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
               {runs.map((batch) => {
                 const isActive = batch.run_id === activeRunId;
                 return (
@@ -431,7 +429,7 @@ export const Dashboard: React.FC = () => {
         </aside>
 
         {/* COLUMN 2: CENTER EMAIL QUEUE LIST */}
-        <section className="w-80 border-r border-slate-200 bg-white flex flex-col shrink-0">
+        <section className="w-full md:w-80 h-[42vh] md:h-auto border-b md:border-b-0 md:border-r border-slate-200 bg-white flex flex-col shrink-0">
           <div className="p-3.5 border-b border-slate-100">
             <div className="text-xs font-bold text-slate-900">
               {formatBatchDate(selectedRun?.started_at)}
@@ -576,7 +574,7 @@ export const Dashboard: React.FC = () => {
         </section>
 
         {/* COLUMN 3: RIGHT DETAIL INSPECTION PANEL */}
-        <main className="flex-1 bg-white overflow-y-auto p-6">
+        <main className="flex-1 min-h-[50vh] min-w-0 bg-white overflow-y-auto p-4 sm:p-6">
           {selectedEmail ? (
             <div className="max-w-4xl space-y-6">
               <div className="flex items-start justify-between">
@@ -669,7 +667,7 @@ export const Dashboard: React.FC = () => {
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
                     FIELD-BY-FIELD COMPARISON
                   </div>
-                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px]">
@@ -850,7 +848,7 @@ export const Dashboard: React.FC = () => {
       {/* MODAL: RUN NEW BATCH OR VIEW LIVE PROGRESS */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl relative">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[calc(100vh-2rem)] overflow-y-auto p-4 sm:p-6 shadow-2xl relative">
             <button
               onClick={() => setShowUploadModal(false)}
               className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"

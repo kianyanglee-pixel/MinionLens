@@ -66,12 +66,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   };
 
   const canSubmit =
-    (sourceType === 'local' && inboxFiles.length > 0 && attachmentFiles.length > 0) ||
-    (sourceType === 'cloud' && cloudInboxUri.trim() !== '' && cloudAttachmentsUri.trim() !== '') ||
-    (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '') ||
-    sourceType === 'database';
+    llmApiKey.trim() !== '' && (
+      (sourceType === 'local' && inboxFiles.length > 0 && attachmentFiles.length > 0) ||
+      (sourceType === 'cloud' && cloudInboxUri.trim() !== '' && cloudAttachmentsUri.trim() !== '') ||
+      (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '') ||
+      sourceType === 'database'
+    );
 
   const handleStartProcessing = async () => {
+    if (!llmApiKey.trim()) {
+      setUploadStatusMsg('Enter a Gemini API key before running verification.');
+      return;
+    }
+
     setIsUploading(true);
     const startedAt = new Date().toISOString();
 
@@ -151,7 +158,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl w-full">
+    <div className="bg-white rounded-2xl w-full min-w-0">
       {/* Header & Source Switcher */}
       <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
         <div>
@@ -203,7 +210,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
 
       {/* 1. LOCAL DIRECTORY MODE */}
       {sourceType === 'local' && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             type="button"
             onClick={() => inboxInputRef.current?.click()}
