@@ -33,11 +33,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   const [dbUrl, setDbUrl] = useState('');
   const [dbKey, setDbKey] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
+  const [llmProvider, setLlmProvider] = useState('gemini');
+  const [llmModel, setLlmModel] = useState('');
+  const [llmRequiresApiKey, setLlmRequiresApiKey] = useState(true);
+  const [serverHasLlmApiKey, setServerHasLlmApiKey] = useState(false);
 
   useEffect(() => {
     fetch(apiUrl('/api/config'))
       .then((res) => res.json())
       .then((data) => {
+        setLlmProvider(data.llm_provider || 'gemini');
+        setLlmModel(data.llm_model || '');
+        setLlmRequiresApiKey(Boolean(data.llm_requires_api_key));
+        setServerHasLlmApiKey(Boolean(data.llm_api_key_configured));
         if (data.status === 'success' && data.default_supabase_url) {
           setDbUrl(data.default_supabase_url);
         }
@@ -66,7 +74,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
   };
 
   const canSubmit =
-    llmApiKey.trim() !== '' && (
+    (!llmRequiresApiKey || serverHasLlmApiKey || llmApiKey.trim() !== '') && (
       (sourceType === 'local' && inboxFiles.length > 0 && attachmentFiles.length > 0) ||
       (sourceType === 'cloud' && cloudInboxUri.trim() !== '' && cloudAttachmentsUri.trim() !== '') ||
       (sourceType === 'drive' && driveInboxUrl.trim() !== '' && driveAttachmentsUrl.trim() !== '') ||
@@ -74,8 +82,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
     );
 
   const handleStartProcessing = async () => {
-    if (!llmApiKey.trim()) {
-      setUploadStatusMsg('Enter a Gemini API key before running verification.');
+    if (llmRequiresApiKey && !serverHasLlmApiKey && !llmApiKey.trim()) {
+      setUploadStatusMsg(`Enter a ${llmProvider} API key before running verification.`);
       return;
     }
 
@@ -192,20 +200,28 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onStartStream }) => {
       </div>
 
       <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-          <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
-          Gemini API key <span className="normal-case font-sans text-slate-400">(required on the server or for this run)</span>
-        </label>
-        <input
-          type="password"
-          value={llmApiKey}
-          onChange={(e) => setLlmApiKey(e.target.value)}
-          placeholder="Required unless the server has GEMINI_API_KEY"
-          autoComplete="off"
-          className="w-full px-3 py-2 text-xs border border-amber-300 rounded-xl font-mono text-slate-800 bg-white focus:outline-none focus:border-amber-500"
-        />
-        <p className="text-[11px] text-amber-800/70 mt-1 font-mono">
-          Sent over HTTPS for this run only. It is not saved in the database or batch files.
-        </p>
+        {llmRequiresApiKey ? (
+          <>
+            <label className="block text-xs font-bold text-slate-700 font-mono uppercase tracking-wider mb-1">
+              {llmProvider} API key <span className="normal-case font-sans text-slate-400">({serverHasLlmApiKey ? 'optional for this run' : 'required unless configured on the backend'})</span>
+            </label>
+            <input
+              type="password"
+              value={llmApiKey}
+              onChange={(e) => setLlmApiKey(e.target.value)}
+              placeholder={serverHasLlmApiKey ? 'Leave blank to use the backend key' : `Enter ${llmProvider} API key`}
+              autoComplete="off"
+              className="w-full px-3 py-2 text-xs border border-amber-300 rounded-xl font-mono text-slate-800 bg-white focus:outline-none focus:border-amber-500"
+            />
+            <p className="text-[11px] text-amber-800/70 mt-1 font-mono">
+              Sent for this run only. It is not saved in the database or batch files.
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-slate-700">
+            Using local Ollama{llmModel ? <> model <code className="font-mono">{llmModel}</code></> : ''}. No API key is needed.
+          </p>
+        )}
       </div>
 
       {/* 1. LOCAL DIRECTORY MODE */}

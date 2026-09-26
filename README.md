@@ -53,18 +53,43 @@ and the trust/escalation decision are all plain, deterministic code — see
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env   # fill in SUPABASE_URL / SUPABASE_KEY and the compulsory GEMINI_API_KEY
+cp .env.example .env   # set SUPABASE_URL / SUPABASE_KEY
 python run.py          # serves http://localhost:5000, routes under /api
 ```
 
-The active LLM provider is picked in `backend/app/llm.py` — see the comment
-block at the top of that file. It defaults to **Google Gemini** (direct,
-`gemini-3.6-flash`). A `GEMINI_API_KEY` is compulsory for processing; put it
-in `backend/.env`, or provide a key in the upload screen for a single run.
-No local install is needed. For free, local,
-no-API-key iteration instead, uncomment the Ollama block: install
-[Ollama](https://ollama.com/download), then `ollama pull qwen2.5:7b` before
-running the backend. OpenRouter/OpenAI are each a one-block swap away too.
+The backend connects directly to Supabase using `SUPABASE_URL` and
+`SUPABASE_KEY` in `backend/.env`. Keep the key on the backend; do not put it
+in frontend environment variables. Use the project's server-side key with
+the permissions needed to read Storage and write the `runs`, `emails`, and
+`review_audit_log` tables.
+
+The LLM provider is selected with `LLM_PROVIDER` in `backend/.env`. Gemini is
+the default. To use local Ollama, set `LLM_PROVIDER=ollama`, install
+[Ollama](https://ollama.com/download), and run:
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+The default Ollama endpoint is `http://localhost:11434/v1`; set
+`OLLAMA_BASE_URL` or `OLLAMA_MODEL` if yours differs. Restart the backend
+after changing `.env`. The upload screen will not ask for an API key when
+Ollama is selected. OpenAI and OpenRouter are also supported through the same
+provider setting.
+
+With the `local` source selected, the browser uploads the batch to the local
+Flask backend, which processes it and writes run/email/review results to the
+configured Supabase project. The original sender, subject, body, and
+attachment names are saved in each email row's `trace` JSON, so the original
+email drawer can show them from another browser/device without reopening the
+source inbox. The `database` source instead reads inbox and attachment files
+already in the configured Supabase Storage bucket.
+
+For a second device on the same trusted network, start Vite with
+`npm run dev -- --host 0.0.0.0` and open the computer's LAN address on port
+5173. The backend already binds to all local interfaces. This app currently
+has no user authentication, so do not expose either development server to the
+public internet; use an authenticated deployment for access outside your LAN.
 
 **Frontend**
 ```bash
