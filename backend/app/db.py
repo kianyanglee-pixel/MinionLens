@@ -110,6 +110,24 @@ def save_single_processed_email(email_row: dict, audit_row: dict | None = None):
         except Exception as err:
             print(f"[!] Audit log insert error for {email_id}: {err}")
 
+def get_persisted_original_email(run_id: str, email_name: str) -> dict | None:
+    """Returns source email evidence saved with a processed row, if present."""
+    response = (
+        get_supabase().table("emails")
+        .select("trace")
+        .eq("run_id", run_id)
+        .eq("email_name", email_name)
+        .limit(1)
+        .execute()
+    )
+    if not response.data:
+        return None
+    trace = response.data[0].get("trace") or {}
+    if not isinstance(trace, dict):
+        return None
+    original = trace.get("original_email")
+    return original if isinstance(original, dict) else None
+
 def get_pending_review_queue():
     supabase = get_supabase()
     response = (

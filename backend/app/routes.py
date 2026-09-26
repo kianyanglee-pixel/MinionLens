@@ -29,8 +29,10 @@ from app.db import (
     save_single_processed_email,
     finalize_run_record,
     get_pending_review_queue,
-    resolve_review_item
+    resolve_review_item,
+    get_persisted_original_email,
 )
+from app.llm import PROVIDER, DEFAULT_MODEL, provider_has_default_api_key, provider_requires_api_key
 
 bp = Blueprint("api", __name__)
 
@@ -272,7 +274,15 @@ def _process_and_save_worker(inbox, email_data, run_id: str, dedup_suffix: str =
         "is_processing_failure": is_processing_failure,
         "run_id": run_id,
         "processed_at": now,
-        "trace": trace_payload
+        "trace": {
+            **trace_payload,
+            "original_email": {
+                "sender": email_data.get("from", ""),
+                "subject": email_data.get("subject", ""),
+                "body": email_data.get("body", ""),
+                "attachments": email_data.get("attachments", []),
+            },
+        }
     }
 
     # A processing failure never enters the Human Review Queue (§2.4-F) — no
@@ -316,6 +326,10 @@ def get_config():
     return jsonify({
         "status": "success",
         "default_supabase_url": os.getenv("SUPABASE_URL", ""),
+        "llm_provider": PROVIDER,
+        "llm_model": DEFAULT_MODEL,
+        "llm_requires_api_key": provider_requires_api_key(),
+        "llm_api_key_configured": provider_has_default_api_key(),
     })
 
 # ==========================================
@@ -329,10 +343,10 @@ def ingest_batch():
         or request_data.get("llm_api_key")
         or ""
     ).strip() or None
-    if not llm_api_key:
+    if provider_requires_api_key() and not llm_api_key and not provider_has_default_api_key():
         return jsonify({
             "status": "error",
-            "message": "A Gemini API key is required for every verification run.",
+            "message": f"An API key is required for the {PROVIDER} provider. Configure it in backend/.env or provide it for this run.",
         }), 400
 
     started_at = (
@@ -479,12 +493,17 @@ def get_attachment_content():
 # ==========================================
 @bp.route("/emails/<email_name>/original", methods=["GET"])
 def get_original_email(email_name):
-    """The source drawer needs the *originating email* (sender/subject/
-    body), not just its attachments — reads straight from the Inbox by the
-    same email_name the emails table already stores, no schema change
-    needed."""
+    """Return persisted email evidence, falling back to the source inbox for older rows."""
     run_id = request.args.get("run_id")
     try:
+        if run_id:
+            try:
+                original = get_persisted_original_email(run_id, email_name)
+            except Exception:
+                original = None
+            if original is not None:
+                return jsonify({"status": "success", **original})
+
         inbox = _resolve_inbox_for_run(run_id)
         email = inbox.get(email_name)
         return jsonify({
@@ -536,15 +555,8 @@ def stream_batch_process():
         if duplicate_ids:
             yield f"data: {json.dumps({'stage': 'WARNING', 'message': f'Duplicate email_id(s) in this batch, kept as separate records: {duplicate_ids}', 'current': 0, 'total': total_emails})}\n\n"
 
-        # Kept at 3, not raised — a higher count here (tried 6) got the
-        # backend OOM-killed on real hardware while Ollama (a local model,
-        # multi-GB resident in memory) was the active provider in llm.py.
-        # The active provider is Gemini (cloud API) now, which doesn't have
-        # that specific memory constraint, but this is left conservative
-        # since Gemini has its own per-project rate limits (llm.py's retry
-        # handles a 429 gracefully, but a much higher worker count would
-        # just mean more of them). If you switch llm.py back to Ollama,
-        # keep this at 3 or lower — see README's OLLAMA_NUM_PARALLEL note.
+        # Kept at 3: a higher count (6) OOM-killed the backend with Ollama.
+        # Keep this conservative for local models and cloud-provider limits.
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
                 executor.submit(_process_and_save_worker, inbox, email, run_id, dedup_suffixes[i], llm_api_key): email
