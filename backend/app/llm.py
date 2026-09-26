@@ -35,6 +35,15 @@ from google.genai import errors, types
 DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 _default_api_key = os.getenv("GEMINI_API_KEY")
 _default_client = genai.Client(api_key=_default_api_key) if _default_api_key else None
+PROVIDER = "Google Gemini"
+
+
+def provider_has_default_api_key() -> bool:
+    return bool(_default_api_key)
+
+
+def provider_requires_api_key() -> bool:
+    return True
 
 # -- OpenAI (direct) ----------------------------------------------------------
 # Needs OPENAI_API_KEY (and optionally OPENAI_MODEL) in .env.
